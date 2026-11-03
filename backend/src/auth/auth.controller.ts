@@ -3,6 +3,7 @@ import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nes
 import { ThrottlerGuard } from '@nestjs/throttler';
 import type { User } from '@prisma/client';
 import type { CookieOptions, Response } from 'express';
+import { Authenticated, Public } from '../access/permission.decorators';
 import { AuditService } from '../audit/audit.service';
 import { AppError } from '../common/errors';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,6 +35,7 @@ export class AuthController {
 
   /** Double-submit token, readable by the SPA (not HttpOnly). An existing well-formed token is kept for other tabs. */
   @Get('csrf')
+  @Public()
   csrf(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response): { token: string } {
     const existing: unknown = req.cookies?.[CSRF_COOKIE];
     const token = typeof existing === 'string' && TOKEN.test(existing) ? existing : randomBytes(32).toString('base64url');
@@ -42,6 +44,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @Public()
   @HttpCode(200)
   async login(
     @Body() dto: LoginDto,
@@ -87,6 +90,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @Authenticated()
   @HttpCode(204)
   async logout(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response): Promise<void> {
     const raw: unknown = req.cookies?.[SESSION_COOKIE];

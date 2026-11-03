@@ -1,19 +1,10 @@
 import 'reflect-metadata';
 import { createHash } from 'node:crypto';
-import {
-  CanActivate,
-  Controller,
-  ExecutionContext,
-  Get,
-  INestApplication,
-  Injectable,
-  Req,
-  UnauthorizedException,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, INestApplication, Req } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
+import { Authenticated } from '../src/access/permission.decorators';
 import { AppModule } from '../src/app.module';
 import type { AuthedRequest } from '../src/auth/session.guard';
 import { Clock, FixedClock } from '../src/common/clock';
@@ -21,17 +12,9 @@ import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { appRoleUrl, resetDatabase, testDatabaseUrl } from './helpers/db';
 
-/** Test-only stand-in for Task 9's permission layer: rejects requests that SessionGuard did not authenticate. */
-@Injectable()
-class RequireUserGuard implements CanActivate {
-  canActivate(ctx: ExecutionContext): boolean {
-    if (!ctx.switchToHttp().getRequest<AuthedRequest>().user) throw new UnauthorizedException();
-    return true;
-  }
-}
-
+/** Any signed-in user; the global PermissionGuard answers 401 when SessionGuard did not authenticate. */
 @Controller('test-protected')
-@UseGuards(RequireUserGuard)
+@Authenticated()
 class ProtectedController {
   @Get()
   me(@Req() req: AuthedRequest): unknown {
@@ -322,7 +305,7 @@ describe('auth: login, sessions, CSRF, throttling (app connected as tocs_app)', 
 
     const after = await protectedGet(sid);
     expect(after.status).toBe(401);
-    expect(after.body.code).toBe('UNAUTHORIZED');
+    expect(after.body.code).toBe('UNAUTHENTICATED');
     expect(await admin.session.count()).toBe(0);
     const audit = await admin.auditLog.findMany({ where: { action: 'auth.logout' } });
     expect(audit).toHaveLength(1);

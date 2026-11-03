@@ -1,11 +1,13 @@
 import { BadRequestException, Controller, Get, INestApplication, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { Public } from '../src/access/permission.decorators';
 import { AppModule } from '../src/app.module';
 import { AppError } from '../src/common/errors';
 import { configureApp } from '../src/configure-app';
 
 @Controller('boom')
+@Public()
 class BoomController {
   @Get('app')
   app(): never {

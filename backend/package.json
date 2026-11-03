@@ -12,6 +12,7 @@
     "test": "jest -c jest.config.ts",
     "test:int": "jest -c jest.int.config.ts --runInBand",
     "prisma:generate": "prisma generate",
+    "seed": "ts-node prisma/seed.ts",
     "prebuild": "npm run prisma:generate",
     "pretypecheck": "npm run prisma:generate",
     "pretest": "npm run prisma:generate",
