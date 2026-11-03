@@ -69,6 +69,21 @@ describe('SchoolYearLookup', () => {
     expect(names(await lookup.currentAndFuture())).toEqual(['B', 'C']);
   });
 
+  it('newest() on 2027-06-16 leaves only C', async () => {
+    at('2027-06-16');
+    expect((await lookup.newest())?.name).toBe('C');
+  });
+
+  it('ignores a row with NULL end_date without crashing', async () => {
+    await prisma.schoolYear.create({ data: { name: 'N' } });
+    at('2026-06-15');
+    expect(names(await lookup.currentAndFuture())).toEqual(['A', 'B', 'C']);
+    expect((await lookup.current())?.name).toBe('A');
+    expect((await lookup.newest())?.name).toBe('C');
+    expect(names(await lookup.activeForRegistration())).toEqual(['B']);
+    expect(names(await lookup.activeForRefund())).toEqual(['B']);
+  });
+
   it('returns null / [] once every year has ended', async () => {
     at('2028-06-16');
     expect(await lookup.current()).toBeNull();
