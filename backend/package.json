@@ -17,12 +17,14 @@
     "pretypecheck": "npm run prisma:generate",
     "pretest": "npm run prisma:generate",
     "pretest:int": "npm run prisma:generate",
-    "prestart:dev": "npm run prisma:generate"
+    "prestart:dev": "npm run prisma:generate",
+    "openapi:build": "nest build && node dist/openapi-build.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.8",
     "@nestjs/core": "^11.2.8",
     "@nestjs/platform-express": "^11.2.8",
+    "@nestjs/swagger": "^11.4.7",
     "@nestjs/throttler": "^6.7.1",
     "@prisma/client": "6.19.3",
     "argon2": "^0.45.2",
@@ -49,6 +51,7 @@
     "eslint": "^9.39.5",
     "globals": "^17.14.0",
     "jest": "^29.7.0",
+    "openapi-typescript": "^7.13.0",
     "pg": "^8.23.1",
     "prisma": "6.19.3",
     "supertest": "^7.3.1",

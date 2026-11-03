@@ -5,6 +5,11 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "tsConfigPath": "tsconfig.build.json",
-    "assets": ["mail/templates/*.txt"]
+    "assets": [
+      "mail/templates/*.txt"
+    ],
+    "plugins": [
+      "@nestjs/swagger"
+    ]
   }
 }

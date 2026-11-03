@@ -16,3 +16,4 @@ dist/
 !.env.example
 coverage/
 *.tsbuildinfo
+openapi.json
