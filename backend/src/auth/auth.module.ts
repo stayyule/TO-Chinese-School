@@ -4,11 +4,14 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AccessModule } from '../access/access.module';
 import { MailModule } from '../mail/mail.module';
 import { PermissionGuard } from '../access/permission.guard';
+import { PersonPhoneService } from '../people/phone';
+import { AdminInvitationsController } from './admin-invitations.controller';
 import { AuthController } from './auth.controller';
 import { AuthTokenService } from './auth-token.service';
 import { CsrfGuard } from './csrf.guard';
 import { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from './password.service';
+import { RegistrationService } from './registration.service';
 import { SessionGuard } from './session.guard';
 import { SessionService } from './session.service';
 
@@ -23,16 +26,18 @@ import { SessionService } from './session.service';
  */
 @Module({
   imports: [ThrottlerModule.forRoot([{ name: 'auth', ttl: 60_000, limit: 20 }]), AccessModule, MailModule],
-  controllers: [AuthController],
+  controllers: [AuthController, AdminInvitationsController],
   providers: [
     PasswordService,
     AuthTokenService,
     SessionService,
     LoginThrottleService,
+    PersonPhoneService,
+    RegistrationService,
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_GUARD, useClass: PermissionGuard },
   ],
-  exports: [PasswordService, SessionService, AuthTokenService, MailModule],
+  exports: [PasswordService, SessionService, AuthTokenService, RegistrationService, MailModule],
 })
 export class AuthModule {}

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import type { User } from '@prisma/client';
 import type { CookieOptions, Response } from 'express';
@@ -11,6 +11,8 @@ import { CSRF_COOKIE } from './csrf.guard';
 import { LoginDto } from './dto/login.dto';
 import { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from './password.service';
+import { RegisterWithInvitationDto } from './dto/register-with-invitation.dto';
+import { RegistrationService } from './registration.service';
 import { AuthedRequest, SESSION_COOKIE } from './session.guard';
 import { SESSION_ABSOLUTE_MS, SessionService } from './session.service';
 
@@ -31,6 +33,7 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly throttle: LoginThrottleService,
     private readonly audit: AuditService,
+    private readonly registration: RegistrationService,
   ) {}
 
   /** Double-submit token, readable by the SPA (not HttpOnly). An existing well-formed token is kept for other tabs. */
@@ -99,5 +102,20 @@ export class AuthController {
       await this.audit.record({ action: 'auth.logout', actorUserId: req.user.id, actorUsername: req.user.username ?? undefined, ip: req.ip });
     }
     res.clearCookie(SESSION_COOKIE, SESSION_COOKIE_OPTIONS);
+  }
+
+  /** Name of the invited person for the registration form; 404 INVALID_TOKEN for unknown/used/expired links. */
+  @Get('invitations/:token')
+  @Public()
+  invitation(@Param('token') token: string): Promise<{ personName: string | null }> {
+    return this.registration.invitationInfo(token);
+  }
+
+  /** Creates the invited person's account (Student Parent, plus derived instructor roles). Does not sign in. */
+  @Post('register-with-invitation')
+  @Public()
+  @HttpCode(201)
+  register(@Body() dto: RegisterWithInvitationDto, @Req() req: AuthedRequest): Promise<{ userId: number }> {
+    return this.registration.register(dto, req.ip);
   }
 }

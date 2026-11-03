@@ -3,15 +3,17 @@ import { DiscoveryModule } from '@nestjs/core';
 import { MeController } from './me.controller';
 import { RolesController } from './roles.controller';
 import { PermissionsService } from './permissions.service';
+import { RoleDerivationService } from './role-derivation.service';
+import { SchoolYearModule } from '../school-year/school-year.module';
 
 /**
- * Roles/permissions lookups and GET /me. The global PermissionGuard is registered by AuthModule (after
+ * Roles/permissions lookups, instructor role derivation and GET /me. The global PermissionGuard is registered by AuthModule (after
  * SessionGuard, in one ordered list); DiscoveryModule backs assertRouteCoverage.
  */
 @Module({
-  imports: [DiscoveryModule],
+  imports: [DiscoveryModule, SchoolYearModule],
   controllers: [MeController, RolesController],
-  providers: [PermissionsService],
-  exports: [PermissionsService],
+  providers: [PermissionsService, RoleDerivationService],
+  exports: [PermissionsService, RoleDerivationService],
 })
 export class AccessModule {}

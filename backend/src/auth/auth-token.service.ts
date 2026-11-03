@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { AppError } from '../common/errors';
 import { Clock } from '../common/clock';
@@ -12,7 +13,7 @@ const LIFETIME_MS: Record<TokenPurpose, number> = {
   password_reset: 6 * HOUR_MS,
 };
 
-const hashToken = (token: string): string => createHash('sha256').update(token).digest('hex');
+export const hashToken = (token: string): string => createHash('sha256').update(token).digest('hex');
 const invalidToken = (): AppError => new AppError(404, 'INVALID_TOKEN', 'This link is invalid or has expired.');
 
 /**
@@ -46,16 +47,17 @@ export class AuthTokenService {
     return { personId: row.personId };
   }
 
-  async consume(purpose: TokenPurpose, token: string): Promise<{ personId: number }> {
+  /** Pass a transaction client to make consumption part of a larger write (it rolls back with it). */
+  async consume(purpose: TokenPurpose, token: string, db: Prisma.TransactionClient = this.prisma): Promise<{ personId: number }> {
     const tokenHash = hashToken(token);
     const now = this.clock.now();
     // Atomic: only one concurrent caller can flip used_at from NULL.
-    const { count } = await this.prisma.authToken.updateMany({
+    const { count } = await db.authToken.updateMany({
       where: { tokenHash, purpose, usedAt: null, expiresAt: { gt: now } },
       data: { usedAt: now },
     });
     if (count !== 1) throw invalidToken();
-    const row = await this.prisma.authToken.findUniqueOrThrow({ where: { tokenHash } });
+    const row = await db.authToken.findUniqueOrThrow({ where: { tokenHash } });
     return { personId: row.personId };
   }
 }

@@ -30,7 +30,7 @@ const LINK_PATHS: Partial<Record<MailTemplate, string>> = {
 };
 
 // One plausible address: no whitespace/control chars, no list or display-name syntax.
-const EMAIL = /^[^\s@,;:<>()[\]"'\\]+@[^\s@,;:<>()[\]"'\\]+\.[^\s@,;:<>()[\]"'\\]+$/;
+export const SINGLE_EMAIL = /^[^\s@,;:<>()[\]"'\\]+@[^\s@,;:<>()[\]"'\\]+\.[^\s@,;:<>()[\]"'\\]+$/;
 const PLACEHOLDER = /\{\{(\w+)\}\}/g;
 const TOKEN = /^[A-Za-z0-9_-]+$/;
 
@@ -50,7 +50,7 @@ export class MailService {
   }
 
   async send(template: MailTemplate, to: string, vars: Record<string, string>): Promise<void> {
-    if (!EMAIL.test(to)) throw new Error('Invalid mail recipient');
+    if (!SINGLE_EMAIL.test(to)) throw new Error('Invalid mail recipient');
     const text = this.render(template, vars);
     await this.transport.deliver({ from: MAIL_FROM, to, subject: SUBJECTS[template], text });
   }

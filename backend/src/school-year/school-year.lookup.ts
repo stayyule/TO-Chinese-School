@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { SchoolYear } from '@prisma/client';
+import type { Prisma, SchoolYear } from '@prisma/client';
 import { Cents, cents } from '../common/cents';
 import { Clock } from '../common/clock';
 import { PacificDate, comparePacific, fromDbDate, toDbDate } from '../common/pacific-date';
@@ -84,17 +84,20 @@ export class SchoolYearLookup {
     private readonly clock: Clock,
   ) {}
 
-  /** Years whose end_date is today or later, earliest start first. NULL end_date never matches. */
-  async currentAndFuture(): Promise<SchoolYearRow[]> {
-    const rows = await this.prisma.schoolYear.findMany({
+  /**
+   * Years whose end_date is today or later, earliest start first. NULL end_date never matches. Pass a transaction
+   * client to read inside a caller's transaction (no second connection while it is open).
+   */
+  async currentAndFuture(db: Prisma.TransactionClient = this.prisma): Promise<SchoolYearRow[]> {
+    const rows = await db.schoolYear.findMany({
       where: { endDate: { gte: toDbDate(this.clock.today()) } },
       orderBy: [{ startDate: 'asc' }, { id: 'asc' }],
     });
     return rows.map(toRow);
   }
 
-  async current(): Promise<SchoolYearRow | null> {
-    return (await this.currentAndFuture())[0] ?? null;
+  async current(db: Prisma.TransactionClient = this.prisma): Promise<SchoolYearRow | null> {
+    return (await this.currentAndFuture(db))[0] ?? null;
   }
 
   async next(): Promise<SchoolYearRow | null> {
