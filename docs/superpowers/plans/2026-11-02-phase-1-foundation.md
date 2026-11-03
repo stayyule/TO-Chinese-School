@@ -82,7 +82,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase A — Foundations
+## Part A — Foundations
 
 ### Task 1: Scaffolding, dev stack, health endpoint
 
@@ -190,7 +190,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase B — Auth, access, audit
+## Part B — Auth, access, audit
 
 ### Task 7: Audit service
 
@@ -338,7 +338,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase C — Domain modules
+## Part C — Domain modules
 
 ### Task 15: People, address and family domain
 
@@ -426,7 +426,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase D — Front end
+## Part D — Front end
 
 ### Task 20: Front-end foundation (API client, auth context, router, layout)
 
@@ -491,7 +491,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase E — Delivery
+## Part E — Delivery
 
 ### Task 24: Container images, production Compose, Caddy
 
