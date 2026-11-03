@@ -5,7 +5,8 @@ import { AuthModule } from './auth/auth.module';
 import { ClockModule } from './common/clock.module';
 import { HealthController } from './health.controller';
 import { PeopleModule } from './people/people.module';
+import { SchoolYearModule } from './school-year/school-year.module';
 import { PrismaModule } from './prisma/prisma.module';
 
-@Module({ imports: [ClockModule, PrismaModule, AuditModule, AuthModule, AccessModule, PeopleModule], controllers: [HealthController] })
+@Module({ imports: [ClockModule, PrismaModule, AuditModule, AuthModule, AccessModule, PeopleModule, SchoolYearModule], controllers: [HealthController] })
 export class AppModule {}

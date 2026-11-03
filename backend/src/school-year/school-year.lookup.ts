@@ -42,7 +42,7 @@ export interface SchoolYearRow {
 
 const date = (d: Date | null): PacificDate | null => (d === null ? null : fromDbDate(d));
 
-function toRow(r: SchoolYear): SchoolYearRow {
+export function toRow(r: SchoolYear): SchoolYearRow {
   return {
     id: r.id,
     name: r.name,
