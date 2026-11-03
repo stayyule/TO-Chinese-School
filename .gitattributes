@@ -1,6 +1,8 @@
 # Deterministic line endings for the rewrite (Prisma checksums migrations by bytes).
-# The legacy trees (chineseschool/, chineseschool-rails2.3.12/, data-export/) are
-# intentionally NOT covered by the text=auto rules so their history is left untouched.
+# The directory-scoped text=auto rules below deliberately omit the legacy trees (chineseschool/,
+# chineseschool-rails2.3.12/, data-export/), whose committed CRLF files are left untouched. The
+# extension rules (*.sql ... *.yml) and the binary rules apply repo-wide, legacy trees included;
+# every legacy file they match was already stored LF (or binary), so they cause no churn there.
 
 /.gitattributes text eol=lf
 /.gitignore text eol=lf

@@ -156,18 +156,20 @@ export class FamiliesService {
   }
 
   /**
-   * The address of the person's first family (old Person#families: families as parent, then as child, each by
-   * id), or null when there is no family or that family has no address.
+   * The prefill address for `personId`'s personal-address form, as seen by `requesterPersonId`, or null when there
+   * is no such family or it has no address. Own record: the first family as parent, then as child, each by id
+   * (old Person#families). Someone else (a child): only the first family, by id, in which the requester is parent
+   * one or two AND the person is a child — never a family the requester does not belong to.
    */
-  async firstFamilyAddress(personId: number): Promise<AddressInput | null> {
+  async firstFamilyAddress(personId: number, requesterPersonId: number): Promise<AddressInput | null> {
     const select = { address: { select: ADDRESS_SELECT } } as const;
+    const asParent = (id: number) => ({ OR: [{ parentOneId: id }, { parentTwoId: id }] });
+    const asChild = (id: number) => ({ familiesChildren: { some: { childId: id } } });
     const family =
-      (await this.prisma.family.findFirst({
-        where: { OR: [{ parentOneId: personId }, { parentTwoId: personId }] },
-        select,
-        orderBy: { id: 'asc' },
-      })) ??
-      (await this.prisma.family.findFirst({ where: { familiesChildren: { some: { childId: personId } } }, select, orderBy: { id: 'asc' } }));
+      personId === requesterPersonId
+        ? ((await this.prisma.family.findFirst({ where: asParent(personId), select, orderBy: { id: 'asc' } })) ??
+          (await this.prisma.family.findFirst({ where: asChild(personId), select, orderBy: { id: 'asc' } })))
+        : await this.prisma.family.findFirst({ where: { AND: [asParent(requesterPersonId), asChild(personId)] }, select, orderBy: { id: 'asc' } });
     if (!family?.address) return null;
     const { street, city, state, zipcode, homePhone, cellPhone, email } = family.address;
     return { street, city, state, zipcode, homePhone, cellPhone, email };

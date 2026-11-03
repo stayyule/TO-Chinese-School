@@ -207,8 +207,12 @@ describe('parent self-service API (app connected as tocs_app)', () => {
       }
     });
 
-    it('401 without a session', async () => {
+    it('401 UNAUTHENTICATED without a session, for GET and every mutation', async () => {
       expect((await http().get('/api/v1/me/families')).status).toBe(401);
+      for (const [method, url, body] of mutations(famA, childA)) {
+        const res = await http()[method](`/api/v1${url}`).set('Cookie', `tocs_csrf=${CSRF}`).set('X-CSRF-Token', CSRF).send(body);
+        expect({ url, status: res.status, code: res.body.code }).toEqual({ url, status: 401, code: 'UNAUTHENTICATED' });
+      }
     });
 
     it('non-numeric or out-of-range ids → 422 VALIDATION_ERROR', async () => {
@@ -323,6 +327,25 @@ describe('parent self-service API (app connected as tocs_app)', () => {
       expect(empty.status).toBe(201);
       expect(empty.body).toMatchObject({ street: '10 A St', city: 'Thousand Oaks', email: '10ASt@example.com' });
       expect(empty.body.id).not.toBe(addrA);
+    });
+
+    it('prefill never copies the address of a family the requester does not belong to', async () => {
+      // childA moves to a new family of parentA1 (higher id than famB) and is also linked to famB (parentB's).
+      const addrA2 = await addr('30 A2 St');
+      const famA2 = (await admin.family.create({ data: { parentOneId: parentA1, addressId: addrA2 } })).id;
+      await admin.familyChild.deleteMany({ where: { familyId: famA, childId: childA } });
+      await admin.familyChild.createMany({ data: [{ familyId: famB, childId: childA }, { familyId: famA2, childId: childA }] });
+      expect(famB).toBeLessThan(famA2);
+      const res = await call('post', `/me/people/${childA}/address`, sidA1, {});
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ street: '30 A2 St', email: '30A2St@example.com' });
+      const text = JSON.stringify(res.body);
+      for (const leaked of ['20 B St', '20BSt@example.com']) expect(text).not.toContain(leaked);
+      const { addressId } = await admin.person.findUniqueOrThrow({ where: { id: childA } });
+      expect(await admin.address.findUniqueOrThrow({ where: { id: addressId as number } })).toMatchObject({
+        street: '30 A2 St',
+        email: '30A2St@example.com',
+      });
     });
 
     it('without any family address, a POST missing fields → 422 keyed by field', async () => {

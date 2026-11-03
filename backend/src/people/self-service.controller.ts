@@ -77,13 +77,15 @@ export class SelfServiceController {
 
   /**
    * Creates the personal address. Fields left out of the body default to the person's first family address
-   * (the old form was prefilled with it); 409 PERSONAL_ADDRESS_EXISTS when one already exists.
+   * among the requester's own families (the old form was prefilled with it; see FamiliesService.firstFamilyAddress); 409 PERSONAL_ADDRESS_EXISTS when one already exists.
    */
   @Post('people/:id/address')
   @RequirePermission('person.self.address.create')
   async createPersonalAddress(@IdParam('id') personId: number, @Body() dto: AddressInputDto, @Req() req: AuthedRequest): Promise<AddressView> {
-    await this.personPolicy.assertSelfOrParent(personIdOf(req), personId);
-    const defaults = await this.families.firstFamilyAddress(personId);
+    const requester = personIdOf(req);
+    await this.personPolicy.assertSelfOrParent(requester, personId);
+    // The policy guarantees a requester person here; prefill only from a family the requester belongs to.
+    const defaults = await this.families.firstFamilyAddress(personId, requester as number);
     const input: AddressInput = { ...dto };
     if (defaults) {
       for (const f of ADDRESS_FIELDS) if (input[f] === undefined) input[f] = defaults[f];
