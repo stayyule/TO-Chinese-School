@@ -38,8 +38,11 @@ export class SessionService {
     return { id, expiresAt };
   }
 
-  /** Valid while used at least every 8 h and younger than 7 days; each use slides `last_seen_at`. */
-  async resolve(rawId: string): Promise<{ userId: number } | null> {
+  /**
+   * Valid while used at least every 8 h and younger than 7 days; each use slides `last_seen_at`. `tokenHash`
+   * identifies the session row (see destroyOthersForUser); it is not a credential.
+   */
+  async resolve(rawId: string): Promise<{ userId: number; tokenHash: string } | null> {
     if (!SESSION_ID.test(rawId)) return null;
     const tokenHash = hashId(rawId);
     const row = await this.prisma.session.findUnique({ where: { tokenHash } });
@@ -51,7 +54,7 @@ export class SessionService {
     }
     // updateMany: a concurrent logout may have deleted the row; that must not turn into a 500.
     const { count } = await this.prisma.session.updateMany({ where: { tokenHash }, data: { lastSeenAt: now } });
-    return count === 1 ? { userId: row.userId } : null;
+    return count === 1 ? { userId: row.userId, tokenHash } : null;
   }
 
   async destroy(rawId: string): Promise<void> {
@@ -61,5 +64,10 @@ export class SessionService {
   /** Pass a transaction client to make this part of a larger write. */
   async destroyAllForUser(userId: number, db: Prisma.TransactionClient = this.prisma): Promise<void> {
     await db.session.deleteMany({ where: { userId } });
+  }
+
+  /** Every session of the user except the one whose hash is `keepTokenHash` (from SessionGuard). */
+  async destroyOthersForUser(userId: number, keepTokenHash: string, db: Prisma.TransactionClient = this.prisma): Promise<void> {
+    await db.session.deleteMany({ where: { userId, tokenHash: { not: keepTokenHash } } });
   }
 }

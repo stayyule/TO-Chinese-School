@@ -12,6 +12,7 @@ import { AuthController } from './auth.controller';
 import { AuthTokenService } from './auth-token.service';
 import { CsrfGuard } from './csrf.guard';
 import { LoginThrottleService } from './login-throttle.service';
+import { MePasswordController } from './me-password.controller';
 import { PasswordService } from './password.service';
 import { RegistrationService } from './registration.service';
 import { SessionGuard } from './session.guard';
@@ -23,12 +24,12 @@ import { SessionService } from './session.service';
  *   1. CsrfGuard (rejects bad non-GET requests before any DB work)
  *   2. SessionGuard (fills req.user, never rejects)
  *   3. PermissionGuard (default-deny: 401/403 from the route's access rule; needs req.user)
- * Do not register APP_GUARDs in any other module. The per-IP ThrottlerGuard is applied on AuthController only.
+ * Do not register APP_GUARDs in any other module. The per-IP ThrottlerGuard is applied on AuthController and MePasswordController only.
  * PrismaService, AuditService and Clock come from their global modules.
  */
 @Module({
   imports: [ThrottlerModule.forRoot([{ name: 'auth', ttl: 60_000, limit: 20 }]), AccessModule, MailModule],
-  controllers: [AuthController, AdminInvitationsController],
+  controllers: [AuthController, AdminInvitationsController, MePasswordController],
   providers: [
     PasswordService,
     AuthTokenService,

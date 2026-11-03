@@ -11,7 +11,8 @@ export interface AuthUser {
   username: string | null;
 }
 
-export type AuthedRequest = Request & { user?: AuthUser };
+/** `sessionTokenHash`: the DB hash of the session that authenticated `user` (set together with it). */
+export type AuthedRequest = Request & { user?: AuthUser; sessionTokenHash?: string };
 
 /**
  * Global guard: authentication context only. Resolves the `tocs_session` cookie and sets `req.user`;
@@ -35,7 +36,10 @@ export class SessionGuard implements CanActivate {
       where: { id: session.userId },
       select: { id: true, personId: true, username: true },
     });
-    if (user) req.user = user;
+    if (user) {
+      req.user = user;
+      req.sessionTokenHash = session.tokenHash;
+    }
     return true;
   }
 }

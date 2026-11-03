@@ -7,6 +7,7 @@ import { MailService } from '../mail/mail.service';
 import { PersonPhoneService } from '../people/phone';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthTokenService } from './auth-token.service';
+import { LOCKOUT_RETRY_AFTER_SECONDS, LOCKOUT_THRESHOLD, LOCKOUT_WINDOW_MS } from './login-throttle.service';
 import { PasswordService } from './password.service';
 import { englishName } from './registration.service';
 import { SessionService } from './session.service';
@@ -19,11 +20,20 @@ export interface ResetPasswordInput {
   phoneNumber: string;
 }
 
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+  newPasswordConfirmation: string;
+}
+
+const PASSWORD_CHANGE_FAILED = 'auth.password_change_failed';
+const PASSWORD_CHANGED = 'auth.password_changed';
+
 const invalidToken = (): AppError => new AppError(404, 'INVALID_TOKEN', 'This link is invalid or has expired.');
 const nonBlank = (s: string | null | undefined): string | null => (s && s.trim() !== '' ? s.trim() : null);
 
 /**
- * Forgot password, reset password, forgot username.
+ * Forgot password, reset password, forgot username, change password.
  *
  * D1: the two "forgot" requests must not reveal whether a username or email is on record. The controller answers
  * 202 {} immediately and the lookup, token issue and mail run detached afterwards (runDetached), so the status,
@@ -117,6 +127,55 @@ export class AccountService implements OnModuleDestroy {
 
     if (outcome.kind === 'phone_mismatch') throw new AppError(422, 'PHONE_MISMATCH', 'The phone number does not match our records');
     if (outcome.kind === 'invalid' || !outcome.value) throw invalidToken();
+  }
+
+  /**
+   * POST /me/password for the signed-in `user`, authenticated by the session `sessionTokenHash`. Order:
+   * confirmation and policy (422; not counted), then, in one transaction holding a per-user advisory lock (so
+   * concurrent guesses are serialized like logins): the lockout (429 PASSWORD_CHANGE_LOCKED once 5
+   * auth.password_change_failed rows exist within 15 min after the last change, D2 numbers), the current password
+   * (PasswordService.verify, legacy hashes included; a failure is audited and counted, 422
+   * CURRENT_PASSWORD_INVALID), then: set password_hash_v2 (legacy columns untouched; v2 is authoritative from now
+   * on), destroy the user's other sessions (the current one stays) and audit auth.password_changed. The new
+   * password may equal the current one. Passwords are never audited.
+   */
+  async changePassword(user: { id: number; username: string | null }, sessionTokenHash: string, input: ChangePasswordInput, ip?: string): Promise<void> {
+    if (input.newPassword !== input.newPasswordConfirmation) {
+      throw new AppError(422, 'PASSWORD_MISMATCH', 'Password and confirmation do not match');
+    }
+    this.passwords.assertPolicy(input.newPassword);
+    // Slow and side-effect free: done before the transaction so the lock is held for one verify only.
+    const passwordHashV2 = await this.passwords.hash(input.newPassword);
+    const actor = { actorUserId: user.id, actorUsername: user.username ?? undefined, targetType: 'user', targetId: user.id, ip };
+
+    // Outcomes are returned, not thrown, so the audited failure commits.
+    const outcome = await this.prisma.$transaction(
+      async (tx): Promise<'locked' | 'invalid' | 'changed'> => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'password_change:' + String(user.id)}))`;
+        const failures = await this.audit.countRecentUserFailures(user.id, PASSWORD_CHANGE_FAILED, PASSWORD_CHANGED, LOCKOUT_WINDOW_MS, tx);
+        if (failures >= LOCKOUT_THRESHOLD) return 'locked';
+        const row = await tx.user.findUniqueOrThrow({
+          where: { id: user.id },
+          select: { passwordHashV2: true, passwordHash: true, passwordSalt: true },
+        });
+        if (!(await this.passwords.verify(input.currentPassword, row)).ok) {
+          await this.audit.record({ action: PASSWORD_CHANGE_FAILED, ...actor }, tx);
+          return 'invalid';
+        }
+        await tx.user.update({ where: { id: user.id }, data: { passwordHashV2, updatedAt: this.clock.now() } });
+        await this.sessions.destroyOthersForUser(user.id, sessionTokenHash, tx);
+        await this.audit.record({ action: PASSWORD_CHANGED, ...actor }, tx);
+        return 'changed';
+      },
+      { maxWait: 5_000, timeout: 10_000 },
+    );
+
+    if (outcome === 'locked') {
+      throw new AppError(429, 'PASSWORD_CHANGE_LOCKED', 'Too many failed attempts. Try again later.', {
+        retryAfterSeconds: LOCKOUT_RETRY_AFTER_SECONDS,
+      });
+    }
+    if (outcome === 'invalid') throw new AppError(422, 'CURRENT_PASSWORD_INVALID', 'The current password is incorrect');
   }
 
   private runDetached(label: string, work: () => Promise<void>): void {

@@ -12,6 +12,7 @@ import { CSRF_COOKIE } from './csrf.guard';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ForgotUsernameDto } from './dto/forgot-username.dto';
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from './password.service';
@@ -126,6 +127,18 @@ export class AuthController {
   @HttpCode(201)
   register(@Body() dto: RegisterWithInvitationDto, @Req() req: AuthedRequest): Promise<{ userId: number }> {
     return this.registration.register(dto, req.ip);
+  }
+
+  /**
+   * Self-registration of a new family (old signin#register). 201 {}; does not sign in. 409 EMAIL_ALREADY_REGISTERED
+   * names no username (D1; "Forgot username" mails it to the address on record).
+   */
+  @Post('register')
+  @Public()
+  @HttpCode(201)
+  async selfRegister(@Body() dto: RegisterDto, @Req() req: AuthedRequest): Promise<Record<string, never>> {
+    await this.registration.selfRegister(dto, req.ip);
+    return {};
   }
 
   /** D1: always 202 {}; the lookup and the mail happen after the response (see AccountService). */

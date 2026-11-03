@@ -40,6 +40,30 @@ export class AuditService {
     });
   }
 
+  /**
+   * `failedAction` rows of the user (by id) within the last `sinceMs`, after the user's most recent
+   * `resetAction` row (e.g. auth.password_change_failed after the last auth.password_changed).
+   */
+  async countRecentUserFailures(
+    userId: number,
+    failedAction: string,
+    resetAction: string,
+    sinceMs: number,
+    db: AuditDb = this.prisma,
+  ): Promise<number> {
+    const cutoff = new Date(this.clock.now().getTime() - sinceMs);
+    const rows = await db.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n
+      FROM audit_logs f
+      WHERE f.action = ${failedAction}
+        AND f.actor_user_id = ${userId}
+        AND f.occurred_at > ${cutoff}::timestamptz
+        AND f.id > COALESCE(
+          (SELECT max(s.id) FROM audit_logs s WHERE s.action = ${resetAction} AND s.actor_user_id = ${userId}),
+          0)`;
+    return rows[0]?.n ?? 0;
+  }
+
   /** Failed logins for `username` within the last `sinceMs`, after its most recent successful login. */
   async countRecentFailures(username: string, sinceMs: number, db: AuditDb = this.prisma): Promise<number> {
     const user = username.toLowerCase();
