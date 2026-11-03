@@ -1,26 +1,36 @@
 -- Creates the two database accounts. Pure SQL, safe to re-run, run as a superuser.
 --   tocs_migrator : owns schema public and its objects, may run DDL (used by `prisma migrate deploy`).
 --   tocs_app      : runtime account; DML only, granted per table by grants.sql (no DDL).
--- Dev passwords default to tocs_migrator_dev / tocs_app_dev. Override without editing this file:
---   PGOPTIONS="-c tocs.migrator_password=... -c tocs.app_password=..."   (psql / docker entrypoint)
--- The Postgres docker entrypoint runs this once on first start (see deploy/compose.dev.yml); CI and
--- the integration-test setup run it too. Run deploy/db/grants.sql afterwards (and after every migrate deploy).
+-- Passwords are supplied as custom settings (psql / docker entrypoint honour PGOPTIONS):
+--   PGOPTIONS="-c tocs.migrator_password=... -c tocs.app_password=..."
+-- Fails closed: a missing password for a role that must be CREATED raises an error, unless the explicit
+-- opt-in `-c tocs.allow_dev_passwords=on` is set (dev compose, tests), which uses the dev defaults
+-- tocs_migrator_dev / tocs_app_dev. The password of an EXISTING role is only changed when its setting
+-- is explicitly supplied; a re-run without settings never resets passwords.
+-- Run deploy/db/grants.sql afterwards (and after every migrate deploy).
 
 DO $$
 DECLARE
-  migrator_pw text := coalesce(nullif(current_setting('tocs.migrator_password', true), ''), 'tocs_migrator_dev');
-  app_pw      text := coalesce(nullif(current_setting('tocs.app_password', true), ''), 'tocs_app_dev');
+  allow_dev boolean := coalesce(current_setting('tocs.allow_dev_passwords', true), '') = 'on';
+  r record;
+  pw text;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tocs_migrator') THEN
-    EXECUTE format('CREATE ROLE tocs_migrator LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', migrator_pw);
-  ELSE
-    EXECUTE format('ALTER ROLE tocs_migrator PASSWORD %L', migrator_pw);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tocs_app') THEN
-    EXECUTE format('CREATE ROLE tocs_app LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', app_pw);
-  ELSE
-    EXECUTE format('ALTER ROLE tocs_app PASSWORD %L', app_pw);
-  END IF;
+  FOR r IN SELECT * FROM (VALUES ('tocs_migrator', 'tocs.migrator_password', 'tocs_migrator_dev'),
+                                 ('tocs_app', 'tocs.app_password', 'tocs_app_dev')) AS v(role, setting, dev_default)
+  LOOP
+    pw := nullif(current_setting(r.setting, true), '');
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r.role) THEN
+      IF pw IS NULL THEN
+        IF NOT allow_dev THEN
+          RAISE EXCEPTION 'init-roles: % is not set; supply it via PGOPTIONS or set tocs.allow_dev_passwords=on (dev only)', r.setting;
+        END IF;
+        pw := r.dev_default;
+      END IF;
+      EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', r.role, pw);
+    ELSIF pw IS NOT NULL THEN
+      EXECUTE format('ALTER ROLE %I PASSWORD %L', r.role, pw);
+    END IF;
+  END LOOP;
 END
 $$;
 

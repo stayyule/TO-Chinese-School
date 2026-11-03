@@ -8,10 +8,14 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DESTRUCTIVE = /\bDROP\s|\bTRUNCATE\b|\bRENAME\b/i;
-const ALLOW = /^\s*--\s*allow-destructive:\s*(\S.*)$/;
+// TRUNCATE as a privilege name in GRANT/REVOKE (followed by "," or ON) is not the statement.
+const DESTRUCTIVE = /\bDROP\s|\bTRUNCATE\b(?!\s*,|\s+ON\b)|\bRENAME\b/i;
+const ALLOW = /^\s*--\s*allow-destructive:[ \t]*(\S[^\r\n]*)$/;
 
-/** Blanks out comments and string literals, preserving newlines and offsets. */
+/**
+ * Blanks out comments and string literals, preserving newlines and offsets. The literal that is the
+ * argument of EXECUTE (or EXECUTE format(...)) is kept: it is SQL that will run.
+ */
 function mask(sql) {
   let out = '';
   let i = 0;
@@ -19,6 +23,14 @@ function mask(sql) {
   while (i < sql.length) {
     const rest = sql.slice(i);
     let m;
+    if ((m = /^EXECUTE\s+(?:format\s*\(\s*)?(?=')/i.exec(rest)) && !/\w/.test(sql[i - 1] ?? ' ')) {
+      const lit = /^'(?:[^']|'')*('|$)/.exec(rest.slice(m[0].length));
+      if (lit) {
+        out += m[0] + lit[0];
+        i += m[0].length + lit[0].length;
+        continue;
+      }
+    }
     if ((m = /^--[^\n]*/.exec(rest)) || (m = /^\/\*[\s\S]*?(\*\/|$)/.exec(rest)) || (m = /^'(?:[^']|'')*('|$)/.exec(rest))) {
       out += blank(m[0]);
       i += m[0].length;
@@ -30,7 +42,7 @@ function mask(sql) {
 }
 
 export function checkSql(sql) {
-  const rawLines = sql.split('\n');
+  const rawLines = sql.split('\n').map((l) => l.replace(/\r$/, ''));
   const masked = mask(sql);
   const problems = [];
   let offset = 0;

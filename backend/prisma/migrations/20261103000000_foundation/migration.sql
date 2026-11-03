@@ -69,3 +69,12 @@ CREATE UNIQUE INDEX "auth_tokens_token_hash_key" ON "auth_tokens"("token_hash");
 -- CreateIndex
 CREATE UNIQUE INDEX "permissions_code_key" ON "permissions"("code");
 
+
+-- audit_logs is append-only for the app account, even before deploy/db/grants.sql runs.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tocs_app') THEN
+    REVOKE UPDATE, DELETE, TRUNCATE ON TABLE "audit_logs" FROM tocs_app;
+  END IF;
+END
+$$;

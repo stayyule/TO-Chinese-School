@@ -72,3 +72,29 @@ test('missing directory is an error', () => {
   const r = spawnSync(process.execPath, [script, join(tmpdir(), 'does-not-exist-xyz')], { encoding: 'utf8' });
   assert.notEqual(r.status, 0);
 });
+
+test('identifiers merely containing keywords do not false-positive', () => {
+  const r = run({ m1: 'CREATE TABLE dropdown (backdrop int, renamed_at text, truncated int);\nCREATE INDEX i ON dropdown(backdrop);\n' });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('CRLF migration file with a valid marker passes; without it fails', () => {
+  assert.equal(run({ m1: '-- allow-destructive: ok\r\nDROP TABLE x;\r\n' }).status, 0);
+  assert.equal(run({ m1: '-- allow-destructive:\r\nDROP TABLE x;\r\n' }).status, 1);
+  assert.equal(run({ m1: 'CREATE TABLE a (x int);\r\nDROP TABLE x;\r\n' }).status, 1);
+});
+
+test('destructive SQL inside EXECUTE literals is detected, other literals are not', () => {
+  assert.equal(run({ m1: "DO $$ BEGIN EXECUTE 'DROP TABLE x'; END $$;\n" }).status, 1);
+  assert.equal(run({ m1: "DO $$ BEGIN EXECUTE format('TRUNCATE %I', 't'); END $$;\n" }).status, 1);
+  assert.equal(run({ m1: "DO $$ BEGIN EXECUTE 'ALTER TABLE a RENAME TO b'; END $$;\n" }).status, 1);
+  assert.equal(run({ m1: "-- allow-destructive: ok\nDO $$ BEGIN EXECUTE 'DROP TABLE x'; END $$;\n" }).status, 0);
+  assert.equal(run({ m1: "DO $$ BEGIN EXECUTE 'REVOKE ALL ON t FROM u'; END $$;\nCREATE TABLE a (n text DEFAULT 'DROP TABLE');\n" }).status, 0);
+});
+
+test('TRUNCATE as a privilege name in GRANT/REVOKE is allowed; TRUNCATE statements are not', () => {
+  assert.equal(run({ m1: 'REVOKE UPDATE, DELETE, TRUNCATE ON TABLE t FROM u;\nGRANT TRUNCATE, SELECT ON t TO u;\n' }).status, 0);
+  assert.equal(run({ m1: 'TRUNCATE TABLE t;\n' }).status, 1);
+  assert.equal(run({ m1: 'TRUNCATE t, u;\n' }).status, 1);
+  assert.equal(run({ m1: 'truncate "on";\n' }).status, 1);
+});

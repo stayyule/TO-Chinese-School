@@ -5,8 +5,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: tocs_dev
-      # init-roles.sql reads these (custom settings via libpq); dev defaults apply when unset.
-      PGOPTIONS: "-c tocs.migrator_password=${TOCS_MIGRATOR_PASSWORD:-tocs_migrator_dev} -c tocs.app_password=${TOCS_APP_PASSWORD:-tocs_app_dev}"
+      # init-roles.sql reads these (custom settings via libpq); allow_dev_passwords is the explicit dev-only opt-in.
+      PGOPTIONS: "-c tocs.allow_dev_passwords=on -c tocs.migrator_password=${TOCS_MIGRATOR_PASSWORD:-tocs_migrator_dev} -c tocs.app_password=${TOCS_APP_PASSWORD:-tocs_app_dev}"
     ports:
       - "5433:5432"
     volumes:

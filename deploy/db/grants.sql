@@ -14,6 +14,12 @@ DECLARE
   t text;
   r record;
 BEGIN
+  -- audit_logs first: append-only, so a failure later in this block can never leave it writable.
+  IF to_regclass('public.audit_logs') IS NOT NULL THEN
+    REVOKE ALL ON TABLE public.audit_logs FROM tocs_app;
+    GRANT SELECT, INSERT ON TABLE public.audit_logs TO tocs_app;
+  END IF;
+
   FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
            AND tablename <> ALL (unmigrated) AND tablename NOT IN ('_prisma_migrations', 'audit_logs')
   LOOP
@@ -29,11 +35,6 @@ BEGIN
       EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE public.%I TO tocs_app', r.relname);
     END IF;
   END LOOP;
-
-  IF to_regclass('public.audit_logs') IS NOT NULL THEN
-    REVOKE ALL ON TABLE public.audit_logs FROM tocs_app;
-    GRANT SELECT, INSERT ON TABLE public.audit_logs TO tocs_app;
-  END IF;
 
   FOREACH t IN ARRAY unmigrated || ARRAY['_prisma_migrations'] LOOP
     IF to_regclass('public.' || quote_ident(t)) IS NOT NULL THEN

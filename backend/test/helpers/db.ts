@@ -4,6 +4,9 @@ import { Client } from 'pg';
 
 export const DEFAULT_TEST_DATABASE_URL = 'postgresql://postgres:postgres@localhost:5433/tocs_test';
 
+/** Explicit dev/test opt-in required by deploy/db/init-roles.sql to fall back to the dev passwords. */
+export const DEV_PASSWORD_OPTIONS = '-c tocs.allow_dev_passwords=on';
+
 export function testDatabaseUrl(): string {
   return process.env.DATABASE_URL ?? DEFAULT_TEST_DATABASE_URL;
 }
@@ -23,7 +26,7 @@ export function assertTestDatabase(url: string): void {
 async function withClient<T>(fn: (c: Client) => Promise<T>): Promise<T> {
   const url = testDatabaseUrl();
   assertTestDatabase(url);
-  const client = new Client({ connectionString: url });
+  const client = new Client({ connectionString: url, options: DEV_PASSWORD_OPTIONS });
   await client.connect();
   try {
     if (!client.database?.endsWith('_test')) {

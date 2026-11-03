@@ -33,3 +33,14 @@ with production passwords supplied via `PGOPTIONS="-c tocs.migrator_password=...
 + init-roles.sql + grants.sql.
 
 Only ever use `migrate reset`, `db push` or `migrate dev` against `tocs_dev` / `tocs_test`.
+
+## Passwords and safety notes
+
+- `init-roles.sql` fails closed: unless `tocs.migrator_password` / `tocs.app_password` are supplied
+  (`PGOPTIONS`), creating a role raises an error. Dev compose and the tests opt in to the dev defaults with
+  `-c tocs.allow_dev_passwords=on`. Re-running without settings never changes an existing role's password.
+- The foundation migration itself revokes UPDATE/DELETE/TRUNCATE on `audit_logs` from `tocs_app` (if that
+  role exists), so the table is append-only even before `grants.sql` runs.
+- `node scripts/verify-migrate-deploy.mjs` exercises the production path for real in scratch DB
+  `tocs_migrate_test`: baseline + roles + empty `_prisma_migrations`, `prisma migrate deploy` as `tocs_migrator`
+  (twice), then grants.
