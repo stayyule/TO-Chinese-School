@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { MeController } from './me.controller';
+import { RolesController } from './roles.controller';
 import { PermissionsService } from './permissions.service';
 
 /**
@@ -9,7 +10,7 @@ import { PermissionsService } from './permissions.service';
  */
 @Module({
   imports: [DiscoveryModule],
-  controllers: [MeController],
+  controllers: [MeController, RolesController],
   providers: [PermissionsService],
   exports: [PermissionsService],
 })
