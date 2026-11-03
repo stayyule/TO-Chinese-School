@@ -31,6 +31,7 @@ const LINK_PATHS: Partial<Record<MailTemplate, string>> = {
 
 // One plausible address: no whitespace/control chars, no list or display-name syntax.
 const EMAIL = /^[^\s@,;:<>()[\]"'\\]+@[^\s@,;:<>()[\]"'\\]+\.[^\s@,;:<>()[\]"'\\]+$/;
+const PLACEHOLDER = /\{\{(\w+)\}\}/g;
 const TOKEN = /^[A-Za-z0-9_-]+$/;
 
 /**
@@ -41,16 +42,16 @@ const TOKEN = /^[A-Za-z0-9_-]+$/;
 export class MailService {
   readonly outbox: OutgoingMail[] = [];
   private readonly baseUrl: string;
-  private transport: MailTransport | undefined;
+  private readonly transport: MailTransport;
 
   constructor(@Inject(MAIL_CONFIG) private readonly config: MailConfig) {
     this.baseUrl = config.appBaseUrl.replace(/\/+$/, '');
+    this.transport = createMailTransport(config, this.outbox); // eager: misconfiguration fails at boot
   }
 
   async send(template: MailTemplate, to: string, vars: Record<string, string>): Promise<void> {
     if (!EMAIL.test(to)) throw new Error('Invalid mail recipient');
     const text = this.render(template, vars);
-    this.transport ??= createMailTransport(this.config, this.outbox);
     await this.transport.deliver({ from: MAIL_FROM, to, subject: SUBJECTS[template], text });
   }
 
@@ -63,12 +64,12 @@ export class MailService {
     }
     const source = readFileSync(path.join(__dirname, 'templates', `${template}.txt`), 'utf8');
     // Single pass: values are never re-scanned for placeholders.
-    const text = source.replace(/\{\{(\w+)\}\}/g, (_m, key: string) => {
+    const text = source.replace(PLACEHOLDER, (_m, key: string) => {
       const value = all[key];
       if (value === undefined) throw new Error(`Missing mail template variable "${key}" for ${template}`);
       return value;
     });
-    if (source.replace(/\{\{(\w+)\}\}/g, '').includes('{{')) throw new Error(`Malformed placeholder in ${template}`);
+    if (source.replace(PLACEHOLDER, '').includes('{{')) throw new Error(`Malformed placeholder in ${template}`);
     return text;
   }
 }

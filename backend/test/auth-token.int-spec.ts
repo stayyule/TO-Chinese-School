@@ -95,6 +95,9 @@ describe('AuthTokenService (DB as tocs_app)', () => {
     clock.set(new Date(expiresAt.getTime() - 1));
     await expect(svc.consume('password_reset', token)).resolves.toEqual({ personId });
     const second = await svc.issue('password_reset', personId);
+    clock.set(second.expiresAt);
+    await invalid(svc.peek('password_reset', second.token));
+    await invalid(svc.consume('password_reset', second.token));
     clock.set(new Date(second.expiresAt.getTime() + HOUR));
     await invalid(svc.consume('password_reset', second.token));
   });
