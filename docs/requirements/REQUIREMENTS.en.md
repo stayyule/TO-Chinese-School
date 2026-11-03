@@ -29,7 +29,7 @@ Accounts and permissions, people and families, school-year configuration, grades
 | Legacy columns | Meet-number columns in `grades` (e.g. `jersey_number_prefix`) are ignored in the new system |
 | Home page | Track-related entries in the `_activity_officer` role panel |
 
-> Note: `activity/forms` (fire drill form, class information, students by class) is not part of the track feature; whether to keep it is open question Q-01.
+> Note: `activity/forms` (fire drill form, class information, students by class) is not part of the track feature; per Q-01 it is **kept** (see FR-COM-03).
 
 ### 1.4 Confirmed constraints
 | ID | Constraint |
@@ -56,7 +56,7 @@ The existing home page renders a panel per role (`app/views/home/_*.html.erb`). 
 | Principal | Administration and oversight |
 | PVA | Parent association (receives withdrawal notifications, etc.) |
 | Communication Officer | Picture-taking form, yearbook student list |
-| Activity Officer | Form-type features (track removed, see Q-01) |
+| Activity Officer | Form-type features (track removed; forms kept per Q-01) |
 | Librarian | Books and checkouts |
 | System administrator | School years, grades, classes, roles/rights, invitations |
 
@@ -165,7 +165,7 @@ Source: `librarian/*`, `library_books`, `library_book_checkouts`
 |----|-------------|-----|------------|
 | FR-COM-01 | Picture-taking consent form (PDF) | S | — |
 | FR-COM-02 | Yearbook student list | S | — |
-| FR-COM-03 | Fire drill form, class information, students by class (`activity/forms`) | C | Open, Q-01 |
+| FR-COM-03 | Fire drill form, class information, students by class (`activity/forms`) | S | Q-01 decided: keep; exports of lists containing student personal data are audit-logged |
 
 Source: `communication/forms_controller`, `activity/forms_controller`
 
@@ -206,7 +206,9 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 - **BR-FEE-10 Order of application**: base tuition → parent-and-student class fee → Pre-K discount → multiple-child discount → late proration → staff/instructor discount.
 - **BR-FEE-11 Rounding**: all proration uses **truncation** (`.to_i`); the new system must reproduce it.
 
-> Review note: the proration in BR-FEE-09 runs after the discounts and before the staff/instructor discount, which affects the final amount. Business owners should confirm this order is intended (Q-10).
+> Decision (Q-10 decided, 2026-11-02): **reproduce the order above faithfully.** It only affects late-registering instructor families: the instructor discount is subtracted after proration, so it is not reduced by 75%. Example (hypothetical numbers): tuition 600, instructor discount 100 → today 600×0.75−100 = 350; if the discount came first, (600−100)×0.75 = 375. Golden cases must cover "late registration + instructor discount" and mark it as known, intentionally kept behavior.
+>
+> Edge: instructor and Pre-K discounts are subtracted with no floor, so tuition goes negative when the discount exceeds it. Reproduce by default and pin the behavior with a golden case; change it separately if the business owners object to negative tuition. The Accounting Officer's confirmation that the instructor discount should not be prorated is still open.
 
 ### 4.2 Membership dues and totals (BR-PAY) — source `registration_payment.rb`
 
@@ -218,20 +220,23 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 
 ### 4.3 Withdrawal and refund (BR-REF) — source `school_year.rb`, `withdraw_request*.rb`
 
-- **BR-REF-01 Tuition refund ratio** (first match wins):
+- **BR-REF-01 Tuition refund ratio** (Q-11 decided; first match wins):
   1. School not yet started → 100%;
-  2. today > `refund_50_percent_date` → 50%;
-  3. today > `refund_90_percent_date` → 90%;
-  4. otherwise 100%.
-  (The legacy `refund_25_percent_date` and `refund_75_percent_date` are no longer used, but the existing code still contains their branches; see the review note below.)
-- **BR-REF-02 PVA refund** uses the same ratio rules as tuition.
+  2. today > `refund_end_date` → **0 (no refund)**;
+  3. today > `refund_50_percent_date` → 50%;
+  4. today > `refund_90_percent_date` → 90%;
+  5. otherwise 100%.
+  (The legacy `refund_25_percent_date` and `refund_75_percent_date` are no longer used and their branches are not implemented. Step 2 is a fix to intent: the old branch is never taken, see the decision below. Proportional refunds use integer arithmetic; the rounding mode is set after the golden cases are measured.)
+- **BR-REF-02 PVA/CCCA refund** (Q-11 decided, corrected): both dues are charged per family. They are refunded in full, from the family's earliest paid payment, only when school has not started and the family has no registered students left after the withdrawal; no refund if 1 or more students remain, or once school has started. (Since 2024-04-14; the old proportional PVA refund function is dead code and is not implemented.)
+- **BR-REF-02a Non-refundable items**: the registration fee is never refunded; the book charge is refunded only before school starts; the elective class fee (whole-class or elective-only withdrawal) is refunded in full regardless of date.
 - **BR-REF-03 Refund total**: `refund_pva + refund_ccca + Σ(detail: registration fee + book charge + tuition + elective fee)`.
 - **BR-REF-04 Side effects (single transaction)**: create a `WithdrawalRecord` per student (registration date, withdrawal date, original grade/class/elective); unless "elective only", set the student status to not registered and delete the class assignment; if "elective only", keep the class assignment, set only the elective class to 0, and clear the elective class in the registration preference; notify instructors if school starts within 1 day.
 - **BR-REF-05 Status**: Pending P, Approved A, Declined D, Cancelled C.
 
-> Review note (suspected defects in existing code; business owners must decide between "reproduce faithfully" and "fix to intent", Q-11):
-> 1. The `refund_end_date` check is written as `!self.refund_end_date && today > refund_end_date`. When the date is present the condition is always false, so **after the end date a proportional refund is still given instead of 0**; when the date is nil it raises.
-> 2. Only the 50%/90% tiers are meant to be active; if the two legacy tier columns still hold data they match first.
+> Decision (Q-11 decided, 2026-11-02):
+> 1. The old `refund_end_date` check is written as `!self.refund_end_date && today > refund_end_date`; when the date is present it is always false, so a proportional refund is still computed after the end date, and when the date is nil it raises. But the parent-side UI shows the withdraw entry only while `refund_end_date >= today`, and the refund is computed at submission, so nothing can be submitted after the end date in normal use. The new system **fixes this to intent (0)** and checks the date on the server at both submission and approval, without relying on the UI hiding the entry.
+> 2. Only the 50%/90% tiers are active; the legacy 25%/75% columns are not implemented.
+> 3. Golden cases record both the old system's actual output and the new corrected output: they must match on non-end-date cases, and the new system returns 0 after the end date.
 
 ### 4.4 Other rules (BR-MISC)
 
@@ -246,11 +251,11 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 
 - Keep the existing PostgreSQL schema (C-1). Core tables retained:
   `addresses`, `book_charges`, `families`, `families_children`, `gateway_transactions`, `grades`, `in_person_registration_transactions`, `instructor_assignments`, `library_book_checkouts`, `library_books`, `manual_transactions`, `people`, `registration_payments`, `registration_preferences`, `rights`, `rights_roles`, `roles`, `roles_users`, `school_class_active_flags`, `school_classes`, `school_years`, `staff_assignments`, `student_class_assignments`, `student_fee_payments`, `student_final_marks`, `student_status_flags`, `timed_tokens`, `users`, `withdraw_request_details`, `withdraw_requests`, `withdrawal_records`.
-- Removed (out of scope): `track_event_heats`, `track_event_programs`, `track_event_signups`, `track_event_teams`, `jersey_numbers`. **Whether to physically drop these tables is a review decision** (Q-12); the new system must at least never read or write them.
+- Removed (out of scope): `track_event_heats`, `track_event_programs`, `track_event_signups`, `track_event_teams`, `jersey_numbers`. (Q-12 decided, 2026-11-02) The new system does **not migrate** these tables; they are not part of its data model and must never be read or written. Whether they are physically dropped from the production DB at cutover or kept untouched is still open.
 - **DATA-01 Join tables without id**: `families_children(family_id, child_id)`, `rights_roles`, `roles_users`.
 - **DATA-02 Non-conventional foreign keys**: `families.parent_one_id/parent_two_id`; `registration_payments.paid_by_id`, `withdraw_requests.request_by_id/status_by_id`, `library_book_checkouts.checked_out_by_id`, etc. point to `people`.
 - **DATA-03 Money**: all `*_in_cents` integers; the new system must not store or compute money in floating point.
-- **DATA-04 Password columns**: `password_hash` (`SHA256(password+salt)` hex) and `password_salt`.
+- **DATA-04 Password columns**: `password_hash` (`SHA256(password+salt)` hex) and `password_salt`. (Q-08 decided) Add `password_hash_v2` to hold the argon2id string; keep the two old columns until after the upgrade deadline, then clear and drop them.
 - **DATA-05 `db/schema.rb` is authoritative**; the migration files are incomplete (earliest 2014). A sanitized copy of the production schema must be obtained and compared before review closes.
 
 ---
@@ -259,11 +264,11 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 
 | ID | Integration | Current state | Requirement |
 |----|-------------|---------------|-------------|
-| INT-01 | Payment gateway | ActiveMerchant → Authorize.net (the `AUTHORIZE_NET_GATEWAY` constant is not in the repo; credentials live on the server); card numbers are not stored, only type and last digits | Keep the feature; move credentials to environment variables; see SEC-05 |
-| INT-02 | E-mail | SMTP; 4 mailers, 10 templates | Keep; SPF/DKIM/DMARC |
-| INT-03 | PDF | 7 Prawn templates, 2 of which are track (removed); kept: class lists ×2, library search result, picture-taking form, fire drill form (Q-01) | Keep, including Chinese font |
+| INT-01 | Payment gateway | ActiveMerchant → Authorize.net (the `AUTHORIZE_NET_GATEWAY` constant is not in the repo; credentials live on the server); card numbers are not stored, only type and last digits | Keep the feature (Q-02 decided): continue with Authorize.net; switch to embedded tokenization so the browser sends the card number straight to the gateway for a token and the back end charges with the token only; payments behind an interface; move credentials to environment variables; see SEC-05 |
+| INT-02 | E-mail | SMTP; 4 mailers, 10 templates | Keep (Q-07 decided): transactional mail service (prefer Postmark, or Amazon SES) via standard SMTP; sending domain `to-cs.org`, keeping the existing From addresses; SPF/DKIM/DMARC see SEC-15 |
+| INT-03 | PDF | 7 Prawn templates, 2 of which are track (removed); kept: class lists ×2, library search result, picture-taking form, fire drill form (Q-01 decided: keep, 5 in total) | Keep, including Chinese font |
 | INT-04 | CSV | Generated inline in controllers (marks download, class information, student lists, etc.) | Keep |
-| INT-05 | `data-export/` scripts | Standalone Sequel + MySQL scripts; school-year id and credentials edited by hand | Disposition open, Q-09 |
+| INT-05 | `data-export/` scripts | Standalone Sequel + MySQL scripts; school-year id and credentials edited by hand | (Q-09 decided) All 13 scripts move into a back-end report-export module that outputs CSV; school year is a page parameter; each report has an explicit permission code; every export is audit-logged; the track script is dropped with the feature. Core features first, reports one phase later |
 
 ---
 
@@ -271,8 +276,8 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 
 - **NFR-01 Chinese**: PDFs and pages fully support Chinese (the existing system embeds Arial Unicode).
 - **NFR-02 Time zone**: all business date rules use Pacific time; tests must be able to freeze time.
-- **NFR-03 Scale**: user count and registration-peak concurrency to be provided (Q-03); capacity must be assessed for a single server.
-- **NFR-04 Availability**: a single server is a single point of failure; RTO/RPO targets must be stated (Q-04).
+- **NFR-03 Scale** (Q-03 decided, 2026-11-02): 300–1000 families per school year (~450–1500 students); registration clusters around the early-bird deadline. Single host 2 vCPU / 4GB / 40GB+, designed for 150 concurrent users and ~20 payments/min with ~3x headroom. Payment submission must be idempotent; fee calculation, payment record and class assignment must run in one database transaction. Acceptance: load test with 150 concurrent parents through the full flow (sandbox payments) before the early-bird deadline. Assumptions to be calibrated with real production data.
+- **NFR-04 Availability** (Q-04 decided, 2026-11-02): a single server is a single point of failure. Normal RPO ≤ 24h; registration-period RPO ≤ 1h; RTO ≤ 4h. Whether a hot standby is needed around the early-bird deadline is for the business owners to confirm.
 - **NFR-05 Audit**: failed sign-ins, role/permission changes, refund approvals, manual transactions and exports of personal data must be audit-logged.
 - **NFR-06 Testability**: the BR rules need automated unit tests covering date boundaries and rounding.
 - **NFR-07 Maintainability**: every new endpoint must declare a permission code explicitly; default deny.
@@ -286,7 +291,7 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 - **OPS-03 Migration**: a backup is taken automatically before each deploy, then database migrations run automatically; failure rolls back to the previous image.
 - **OPS-04 Configuration and secrets**: environment variables or restricted-permission files (600); never committed.
 - **OPS-05 Monitoring**: `/healthz`, structured logs, CPU/memory/disk/certificate-expiry alerts, error reporting; alerts for payment and mail failures.
-- **OPS-06 Backup**: daily encrypted `pg_dump` (optional WAL archiving) stored off-host; periodic restore drills; retention policy to be decided.
+- **OPS-06 Backup** (Q-04 decided): daily encrypted `pg_dump` normally; during registration prefer WAL archiving (else hourly backups). Backups are encrypted before upload, the key is not kept on the server, and copies go to object storage under a different cloud vendor account. Retention: daily 30 days, monthly 12 months. At least one restore drill per year before registration opens.
 - **OPS-07 Single-host limits**: no high availability; the host must be rebuildable quickly from scripts (infrastructure as code).
 
 ---
@@ -301,7 +306,7 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 | SEC-02 | Passwords are `SHA256(password + 6-byte salt)`, weak against brute force; minimum length 6 | Use argon2id (or bcrypt); raise the minimum length; rate-limit and lock; upgrade old hashes after the first successful sign-in (Q-08) |
 | SEC-03 | Authorization matches Rails `controller/action` strings | Use explicit permission codes; perform **object-level** authorization on every endpoint (a parent may access only their own family/children — prevent IDOR) |
 | SEC-04 | `sibling_in_same_grade` uses string-concatenated SQL | Parameterized queries everywhere; no concatenation |
-| SEC-05 | Payment: location of `AUTHORIZE_NET_GATEWAY` credentials is unclear | Never store or log card numbers; prefer gateway-hosted fields/tokenization to shrink PCI scope; keep credentials in server environment variables and rotate them |
+| SEC-05 | Payment: location of `AUTHORIZE_NET_GATEWAY` credentials is unclear | Never store or log card numbers; **card numbers must not pass through our server** (Q-02 decided: embedded tokenization, the browser gets the token from the gateway directly); keep credentials in server environment variables and rotate them; development and testing use sandbox accounts only; confirm the matching PCI self-assessment level against the official docs during design |
 | SEC-06 | Rails cookie session; `TimedToken` tokens are stored in clear | Cookies HttpOnly, Secure, SameSite; CSRF protection; reset/invitation tokens single-use, short-lived and **stored only as hashes** |
 | SEC-07 | `lib/key/` (gitignored) and hard-coded user name in `database.yml` | No secrets in the repository; enable secret scanning in CI |
 | SEC-08 | Large amount of personal data on minors and parents (names, phones, addresses) | Minimize fields, mask by role, audit-log exports (CSV/PDF), define retention and deletion procedures |
@@ -313,7 +318,7 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 - **SEC-12 Containers**: run as non-root, read-only root filesystem, drop unneeded capabilities; never expose the Docker daemon port.
 - **SEC-13 Database**: localhost only; the application uses a least-privilege dedicated role (not superuser); `scram-sha-256`; encrypted backups; disk (cloud volume) encryption.
 - **SEC-14 TLS**: Let's Encrypt with auto-renewal; HSTS; disable legacy protocols; security headers (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy).
-- **SEC-15 Mail**: SPF, DKIM, DMARC.
+- **SEC-15 Mail** (Q-07 decided): configure SPF, DKIM, DMARC for `to-cs.org`. Merge the new sender into the existing SPF record, never add a second one; DMARC starts at `p=none` for 1–2 weeks, then moves to `quarantine`. Alert on bounce rate, complaint rate and send failures.
 - **SEC-16 Supply chain**: dependency and image vulnerability scanning in CI, pinned versions, timely upgrades.
 - **SEC-17 Logging and audit**: centralized logs with restricted access and redaction (no card numbers, passwords or tokens); defined retention.
 - **SEC-18 Single-host risk**: application and database on one host means a compromised application can reach the database — least-privilege DB accounts, container-network isolation and off-host encrypted backups are the key compensating controls.
@@ -322,11 +327,12 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 
 ## 10. Migration and Verification Strategy
 
-- **MIG-01 Password compatibility**: the new system must verify the old `SHA256(password+salt)` and upgrade to the new hash after the first successful sign-in.
+- **MIG-01 Password compatibility** (Q-08 decided, 2026-11-02): the new system must verify the old `SHA256(password+salt)` and silently upgrade to argon2id on a successful sign-in with the old password (only the hash changes, not the password). The deadline is 6 months after launch (away from the registration peak); accounts still on the old hash then lose it and reset by email. The new password rule (minimum 10 characters) applies only on change/reset. Sign-in rate limiting and lockout must ship before launch; failed sign-ins, resets and hash upgrades go to the audit log.
 - **MIG-02 Permission mapping**: build an old (controller, action) → new permission-code mapping and assert per entry that role access matches the old system.
 - **MIG-03 Money golden cases**: generate from the old system a table of tuition/dues/refund amounts for fixed inputs (date boundaries, multiple children, staff/instructor, late proration, parent-and-student class); the new system must pass them.
-- **MIG-04 Parallel verification**: run the new system on a copy of the database and compare people/class/transaction summary reports with the old system's output.
-- **MIG-05 Track data**: handle per the Q-12 decision (keep but never touch / export to archive then drop).
+- **MIG-04 Parallel verification** (Q-05 decided, 2026-11-02): the new system connects only to a **sanitized copy** of the production DB and its people/class/transaction summary reports are compared with the old system's output; the two systems never share the production DB.
+- **MIG-06 Cutover** (Q-05 decided): after sign-off, in a low-traffic window (between registration periods, away from the early-bird deadline), stop the old system, take a final backup, and let the new system take over the DB in one step; only one system writes to the DB at any time.
+- **MIG-05 Track data** (Q-12 decided): not migrated; the new data model excludes these 5 tables and ignores the `grades.jersey_number_prefix` column. Physical drop versus keep-untouched in the production DB is open; if kept, the application account gets no privileges on them and the migration tool must never auto-`DROP`.
 
 ---
 
@@ -353,6 +359,8 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 | Similarity to ERB | Low (JSX) | Higher (template syntax) |
 
 > On a single host the back-end options differ little; the choice mainly depends on team skills and whether a built-in admin UI is wanted. **This table is for review only and is not a decision.**
+>
+> **Update (2026-11-02, Q-06 decided):** back end NestJS + Prisma, front end React (Vite + TypeScript). The table is kept as the decision rationale.
 
 ## Appendix B: Glossary (Chinese / English)
 
@@ -369,8 +377,8 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 | 员工分配 | Staff Assignment | Determines the staff discount |
 | 注册付款 | Registration Payment | One family payment covering several students |
 | 学生费用明细 | Student Fee Payment | Per-student registration/tuition/book/elective fees |
-| PVA | PVA | One of the dues; full name to be confirmed (Q-13) |
-| CCCA | CCCA | One of the dues, waived for lifetime members; full name to be confirmed (Q-13) |
+| PVA | PVA | One of the dues; abbreviation only, no full name needed (Q-13 decided) |
+| CCCA | CCCA | One of the dues, waived for lifetime members; abbreviation only, no full name needed (Q-13 decided) |
 | 早鸟 | Early Registration | Early tuition and deadline |
 | 迟报折算 | Late Registration Prorate | 75% proration |
 | 多孩折扣 | Multiple-Child Discount | 3rd and later students |
