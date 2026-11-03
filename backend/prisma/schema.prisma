@@ -1,0 +1,558 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  // The legacy database has no foreign keys and may hold orphaned rows; relations are
+  // emulated by Prisma Client and no FK constraints are ever created (additive-only policy).
+  relationMode = "prisma"
+}
+
+model Address {
+  id        Int       @id @default(autoincrement())
+  street    String?   @db.VarChar(255)
+  city      String?   @db.VarChar(255)
+  state     String?   @db.VarChar(255)
+  zipcode   String?   @db.VarChar(255)
+  homePhone String?   @map("home_phone") @db.VarChar(255)
+  cellPhone String?   @map("cell_phone") @db.VarChar(255)
+  email     String?   @db.VarChar(255)
+  createdAt DateTime? @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime? @map("updated_at") @db.Timestamp(6)
+  families  Family[]  @relation("FamilyAddressId")
+  people    Person[]  @relation("PersonAddressId")
+
+  @@map("addresses")
+}
+
+model BookCharge {
+  id                Int        @id @default(autoincrement())
+  gradeId           Int        @map("grade_id")
+  schoolYearId      Int        @map("school_year_id")
+  bookChargeInCents Int        @default(2000) @map("book_charge_in_cents")
+  createdAt         DateTime?  @map("created_at") @db.Timestamp(6)
+  updatedAt         DateTime?  @map("updated_at") @db.Timestamp(6)
+  grade             Grade      @relation("BookChargeGradeId", fields: [gradeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolYear        SchoolYear @relation("BookChargeSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("book_charges")
+}
+
+model Family {
+  id                 Int           @id @default(autoincrement())
+  parentOneId        Int?          @map("parent_one_id")
+  parentTwoId        Int?          @map("parent_two_id")
+  addressId          Int?          @map("address_id")
+  createdAt          DateTime?     @map("created_at") @db.Timestamp(6)
+  updatedAt          DateTime?     @map("updated_at") @db.Timestamp(6)
+  cccaLifetimeMember Boolean       @default(false) @map("ccca_lifetime_member")
+  address            Address?      @relation("FamilyAddressId", fields: [addressId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  parentOne          Person?       @relation("FamilyParentOneId", fields: [parentOneId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  parentTwo          Person?       @relation("FamilyParentTwoId", fields: [parentTwoId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  familiesChildren   FamilyChild[] @relation("FamilyChildFamilyId")
+
+  @@map("families")
+}
+
+model FamilyChild {
+  familyId  Int       @map("family_id")
+  childId   Int       @map("child_id")
+  createdAt DateTime? @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime? @map("updated_at") @db.Timestamp(6)
+  family    Family    @relation("FamilyChildFamilyId", fields: [familyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  child     Person    @relation("FamilyChildChildId", fields: [childId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([familyId, childId])
+  @@map("families_children")
+}
+
+model GatewayTransaction {
+  id                    Int                  @id @default(autoincrement())
+  registrationPaymentId Int?                 @map("registration_payment_id")
+  amountInCents         Int?                 @map("amount_in_cents")
+  creditCardType        String?              @map("credit_card_type") @db.VarChar(255)
+  creditCardLastDigits  String?              @map("credit_card_last_digits") @db.VarChar(255)
+  approvalStatus        String?              @map("approval_status") @db.VarChar(255)
+  errorMessage          String?              @map("error_message") @db.VarChar(255)
+  approvalCode          String?              @map("approval_code") @db.VarChar(255)
+  referenceNumber       String?              @map("reference_number") @db.VarChar(255)
+  credit                Boolean              @default(false)
+  responseDump          String?              @map("response_dump")
+  createdAt             DateTime?            @map("created_at") @db.Timestamp(6)
+  updatedAt             DateTime?            @map("updated_at") @db.Timestamp(6)
+  registrationPayment   RegistrationPayment? @relation("GatewayTransactionRegistrationPaymentId", fields: [registrationPaymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("gateway_transactions")
+}
+
+model Grade {
+  id                                   Int                      @id @default(autoincrement())
+  chineseName                          String?                  @map("chinese_name") @db.VarChar(255)
+  englishName                          String?                  @map("english_name") @db.VarChar(255)
+  shortName                            String?                  @map("short_name") @db.VarChar(255)
+  nextGrade                            Int?                     @map("next_grade")
+  createdAt                            DateTime?                @map("created_at") @db.Timestamp(6)
+  updatedAt                            DateTime?                @map("updated_at") @db.Timestamp(6)
+  jerseyNumberPrefix                   String?                  @map("jersey_number_prefix") @db.VarChar(255)
+  bookCharges                          BookCharge[]             @relation("BookChargeGradeId")
+  nextGradeRecord                      Grade?                   @relation("GradeNextGrade", fields: [nextGrade], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  previousGrades                       Grade[]                  @relation("GradeNextGrade")
+  registrationPreferencesPreviousGrade RegistrationPreference[] @relation("RegistrationPreferencePreviousGradeId")
+  registrationPreferencesGrade         RegistrationPreference[] @relation("RegistrationPreferenceGradeId")
+  schoolClasses                        SchoolClass[]            @relation("SchoolClassGradeId")
+  studentClassAssignments              StudentClassAssignment[] @relation("StudentClassAssignmentGradeId")
+  withdrawalRecords                    WithdrawalRecord[]       @relation("WithdrawalRecordGradeId")
+
+  @@map("grades")
+}
+
+model InPersonRegistrationTransaction {
+  id                    Int                  @id @default(autoincrement())
+  registrationPaymentId Int?                 @map("registration_payment_id")
+  recordedById          Int?                 @map("recorded_by_id")
+  paymentMethod         String?              @map("payment_method") @db.VarChar(255)
+  checkNumber           String?              @map("check_number") @db.VarChar(255)
+  note                  String?
+  createdAt             DateTime?            @map("created_at") @db.Timestamp(6)
+  updatedAt             DateTime?            @map("updated_at") @db.Timestamp(6)
+  registrationPayment   RegistrationPayment? @relation("InPersonRegistrationTransactionRegistrationPaymentId", fields: [registrationPaymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  recordedBy            Person?              @relation("InPersonRegistrationTransactionRecordedById", fields: [recordedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("in_person_registration_transactions")
+}
+
+model InstructorAssignment {
+  id            Int          @id @default(autoincrement())
+  schoolYearId  Int?         @map("school_year_id")
+  schoolClassId Int?         @map("school_class_id")
+  instructorId  Int?         @map("instructor_id")
+  startDate     DateTime?    @map("start_date") @db.Date
+  endDate       DateTime?    @map("end_date") @db.Date
+  createdAt     DateTime?    @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime?    @map("updated_at") @db.Timestamp(6)
+  role          String?      @db.VarChar(255)
+  schoolYear    SchoolYear?  @relation("InstructorAssignmentSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolClass   SchoolClass? @relation("InstructorAssignmentSchoolClassId", fields: [schoolClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  instructor    Person?      @relation("InstructorAssignmentInstructorId", fields: [instructorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("instructor_assignments")
+}
+
+model ManualTransaction {
+  id              Int       @id @default(autoincrement())
+  recordedById    Int?      @map("recorded_by_id")
+  studentId       Int?      @map("student_id")
+  transactionById Int?      @map("transaction_by_id")
+  amountInCents   Int       @default(0) @map("amount_in_cents")
+  transactionType String?   @map("transaction_type") @db.VarChar(255)
+  transactionDate DateTime? @map("transaction_date") @db.Date
+  paymentMethod   String?   @map("payment_method") @db.VarChar(255)
+  checkNumber     String?   @map("check_number") @db.VarChar(255)
+  note            String?
+  createdAt       DateTime? @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime? @map("updated_at") @db.Timestamp(6)
+  recordedBy      Person?   @relation("ManualTransactionRecordedById", fields: [recordedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student         Person?   @relation("ManualTransactionStudentId", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  transactionBy   Person?   @relation("ManualTransactionTransactionById", fields: [transactionById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("manual_transactions")
+}
+
+model Person {
+  id                               Int                               @id @default(autoincrement())
+  englishLastName                  String?                           @map("english_last_name") @db.VarChar(255)
+  englishFirstName                 String?                           @map("english_first_name") @db.VarChar(255)
+  chineseName                      String?                           @map("chinese_name") @db.VarChar(255)
+  gender                           String?                           @db.VarChar(255)
+  birthYear                        Int?                              @map("birth_year")
+  birthMonth                       Int?                              @map("birth_month")
+  nativeLanguage                   String?                           @map("native_language") @db.VarChar(255)
+  addressId                        Int?                              @map("address_id")
+  createdAt                        DateTime?                         @map("created_at") @db.Timestamp(6)
+  updatedAt                        DateTime?                         @map("updated_at") @db.Timestamp(6)
+  familiesParentOne                Family[]                          @relation("FamilyParentOneId")
+  familiesParentTwo                Family[]                          @relation("FamilyParentTwoId")
+  familiesChildren                 FamilyChild[]                     @relation("FamilyChildChildId")
+  inPersonRegistrationTransactions InPersonRegistrationTransaction[] @relation("InPersonRegistrationTransactionRecordedById")
+  instructorAssignments            InstructorAssignment[]            @relation("InstructorAssignmentInstructorId")
+  manualTransactionsRecordedBy     ManualTransaction[]               @relation("ManualTransactionRecordedById")
+  manualTransactionsStudent        ManualTransaction[]               @relation("ManualTransactionStudentId")
+  manualTransactionsTransactionBy  ManualTransaction[]               @relation("ManualTransactionTransactionById")
+  address                          Address?                          @relation("PersonAddressId", fields: [addressId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  registrationPayments             RegistrationPayment[]             @relation("RegistrationPaymentPaidById")
+  registrationPreferencesStudent   RegistrationPreference[]          @relation("RegistrationPreferenceStudentId")
+  registrationPreferencesEnteredBy RegistrationPreference[]          @relation("RegistrationPreferenceEnteredById")
+  staffAssignments                 StaffAssignment[]                 @relation("StaffAssignmentPersonId")
+  studentClassAssignments          StudentClassAssignment[]          @relation("StudentClassAssignmentStudentId")
+  studentFeePayments               StudentFeePayment[]               @relation("StudentFeePaymentStudentId")
+  studentFinalMarks                StudentFinalMark[]                @relation("StudentFinalMarkStudentId")
+  studentStatusFlags               StudentStatusFlag[]               @relation("StudentStatusFlagStudentId")
+  timedTokens                      TimedToken[]                      @relation("TimedTokenPersonId")
+  users                            User[]                            @relation("UserPersonId")
+  withdrawRequestDetails           WithdrawRequestDetail[]           @relation("WithdrawRequestDetailStudentId")
+  withdrawRequestsRequestBy        WithdrawRequest[]                 @relation("WithdrawRequestRequestById")
+  withdrawRequestsStatusBy         WithdrawRequest[]                 @relation("WithdrawRequestStatusById")
+  withdrawalRecords                WithdrawalRecord[]                @relation("WithdrawalRecordStudentId")
+
+  @@map("people")
+}
+
+model RegistrationPayment {
+  id                               Int                               @id @default(autoincrement())
+  schoolYearId                     Int?                              @map("school_year_id")
+  paidById                         Int?                              @map("paid_by_id")
+  pvaDueInCents                    Int?                              @map("pva_due_in_cents")
+  cccaDueInCents                   Int?                              @map("ccca_due_in_cents")
+  grandTotalInCents                Int?                              @map("grand_total_in_cents")
+  paid                             Boolean                           @default(false)
+  createdAt                        DateTime?                         @map("created_at") @db.Timestamp(6)
+  updatedAt                        DateTime?                         @map("updated_at") @db.Timestamp(6)
+  requestInPerson                  Boolean                           @default(false) @map("request_in_person")
+  electiveClassDueInCents          Int                               @default(0) @map("elective_class_due_in_cents")
+  gatewayTransactions              GatewayTransaction[]              @relation("GatewayTransactionRegistrationPaymentId")
+  inPersonRegistrationTransactions InPersonRegistrationTransaction[] @relation("InPersonRegistrationTransactionRegistrationPaymentId")
+  schoolYear                       SchoolYear?                       @relation("RegistrationPaymentSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  paidBy                           Person?                           @relation("RegistrationPaymentPaidById", fields: [paidById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  studentFeePayments               StudentFeePayment[]               @relation("StudentFeePaymentRegistrationPaymentId")
+
+  @@map("registration_payments")
+}
+
+model RegistrationPreference {
+  id                        Int          @id @default(autoincrement())
+  schoolYearId              Int?         @map("school_year_id")
+  studentId                 Int?         @map("student_id")
+  enteredById               Int?         @map("entered_by_id")
+  previousGradeId           Int?         @map("previous_grade_id")
+  gradeId                   Int?         @map("grade_id")
+  schoolClassType           String?      @map("school_class_type") @db.VarChar(255)
+  electiveClassId           Int?         @map("elective_class_id")
+  createdAt                 DateTime?    @map("created_at") @db.Timestamp(6)
+  updatedAt                 DateTime?    @map("updated_at") @db.Timestamp(6)
+  reRegisterElectiveClassId Int?         @default(0) @map("re_register_elective_class_id")
+  schoolYear                SchoolYear?  @relation("RegistrationPreferenceSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student                   Person?      @relation("RegistrationPreferenceStudentId", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  enteredBy                 Person?      @relation("RegistrationPreferenceEnteredById", fields: [enteredById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  previousGrade             Grade?       @relation("RegistrationPreferencePreviousGradeId", fields: [previousGradeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  grade                     Grade?       @relation("RegistrationPreferenceGradeId", fields: [gradeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  electiveClass             SchoolClass? @relation("RegistrationPreferenceElectiveClassId", fields: [electiveClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reRegisterElectiveClass   SchoolClass? @relation("RegistrationPreferenceReRegisterElectiveClassId", fields: [reRegisterElectiveClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("registration_preferences")
+}
+
+model Right {
+  id          Int         @id @default(autoincrement())
+  name        String?     @db.VarChar(255)
+  controller  String?     @db.VarChar(255)
+  action      String?     @db.VarChar(255)
+  createdAt   DateTime?   @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime?   @map("updated_at") @db.Timestamp(6)
+  rightsRoles RightRole[] @relation("RightRoleRightId")
+
+  @@map("rights")
+}
+
+model RightRole {
+  rightId   Int       @map("right_id")
+  roleId    Int       @map("role_id")
+  createdAt DateTime? @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime? @map("updated_at") @db.Timestamp(6)
+  right     Right     @relation("RightRoleRightId", fields: [rightId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  role      Role      @relation("RightRoleRoleId", fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([rightId, roleId])
+  @@map("rights_roles")
+}
+
+model Role {
+  id          Int         @id @default(autoincrement())
+  name        String?     @db.VarChar(255)
+  createdAt   DateTime?   @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime?   @map("updated_at") @db.Timestamp(6)
+  rightsRoles RightRole[] @relation("RightRoleRoleId")
+  rolesUsers  RoleUser[]  @relation("RoleUserRoleId")
+
+  @@map("roles")
+}
+
+model RoleUser {
+  roleId    Int       @map("role_id")
+  userId    Int       @map("user_id")
+  createdAt DateTime? @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime? @map("updated_at") @db.Timestamp(6)
+  role      Role      @relation("RoleUserRoleId", fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user      User      @relation("RoleUserUserId", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([roleId, userId])
+  @@map("roles_users")
+}
+
+model SchoolClassActiveFlag {
+  id            Int          @id @default(autoincrement())
+  schoolClassId Int?         @map("school_class_id")
+  schoolYearId  Int?         @map("school_year_id")
+  active        Boolean      @default(true)
+  createdAt     DateTime?    @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime?    @map("updated_at") @db.Timestamp(6)
+  schoolClass   SchoolClass? @relation("SchoolClassActiveFlagSchoolClassId", fields: [schoolClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolYear    SchoolYear?  @relation("SchoolClassActiveFlagSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("school_class_active_flags")
+}
+
+model SchoolClass {
+  id                                             Int                      @id @default(autoincrement())
+  englishName                                    String?                  @map("english_name") @db.VarChar(255)
+  chineseName                                    String?                  @map("chinese_name") @db.VarChar(255)
+  description                                    String?                  @db.VarChar(255)
+  location                                       String?                  @db.VarChar(255)
+  maxSize                                        Int?                     @map("max_size")
+  minAge                                         Int?                     @map("min_age")
+  maxAge                                         Int?                     @map("max_age")
+  gradeId                                        Int?                     @map("grade_id")
+  createdAt                                      DateTime?                @map("created_at") @db.Timestamp(6)
+  updatedAt                                      DateTime?                @map("updated_at") @db.Timestamp(6)
+  shortName                                      String?                  @map("short_name") @db.VarChar(255)
+  schoolClassType                                String?                  @map("school_class_type") @db.VarChar(255)
+  instructorAssignments                          InstructorAssignment[]   @relation("InstructorAssignmentSchoolClassId")
+  registrationPreferencesElectiveClass           RegistrationPreference[] @relation("RegistrationPreferenceElectiveClassId")
+  registrationPreferencesReRegisterElectiveClass RegistrationPreference[] @relation("RegistrationPreferenceReRegisterElectiveClassId")
+  schoolClassActiveFlags                         SchoolClassActiveFlag[]  @relation("SchoolClassActiveFlagSchoolClassId")
+  grade                                          Grade?                   @relation("SchoolClassGradeId", fields: [gradeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  studentClassAssignmentsSchoolClass             StudentClassAssignment[] @relation("StudentClassAssignmentSchoolClassId")
+  studentClassAssignmentsElectiveClass           StudentClassAssignment[] @relation("StudentClassAssignmentElectiveClassId")
+  studentFinalMarks                              StudentFinalMark[]       @relation("StudentFinalMarkSchoolClassId")
+  withdrawalRecordsSchoolClass                   WithdrawalRecord[]       @relation("WithdrawalRecordSchoolClassId")
+  withdrawalRecordsElectiveClass                 WithdrawalRecord[]       @relation("WithdrawalRecordElectiveClassId")
+
+  @@map("school_classes")
+}
+
+model SchoolYear {
+  id                                               Int                      @id @default(autoincrement())
+  name                                             String?                  @db.VarChar(255)
+  description                                      String?                  @db.VarChar(255)
+  startDate                                        DateTime?                @map("start_date") @db.Date
+  endDate                                          DateTime?                @map("end_date") @db.Date
+  createdAt                                        DateTime?                @map("created_at") @db.Timestamp(6)
+  updatedAt                                        DateTime?                @map("updated_at") @db.Timestamp(6)
+  registrationStartDate                            DateTime?                @map("registration_start_date") @db.Date
+  registration75PercentDate                        DateTime?                @map("registration_75_percent_date") @db.Date
+  registration50PercentDate                        DateTime?                @map("registration_50_percent_date") @db.Date
+  registrationEndDate                              DateTime?                @map("registration_end_date") @db.Date
+  refund75PercentDate                              DateTime?                @map("refund_75_percent_date") @db.Date
+  refund50PercentDate                              DateTime?                @map("refund_50_percent_date") @db.Date
+  refund25PercentDate                              DateTime?                @map("refund_25_percent_date") @db.Date
+  refundEndDate                                    DateTime?                @map("refund_end_date") @db.Date
+  ageCutoffMonth                                   Int?                     @map("age_cutoff_month")
+  registrationFeeInCents                           Int                      @default(2000) @map("registration_fee_in_cents")
+  tuitionInCents                                   Int                      @default(38000) @map("tuition_in_cents")
+  pvaMembershipDueInCents                          Int                      @default(1500) @map("pva_membership_due_in_cents")
+  cccaMembershipDueInCents                         Int                      @default(2000) @map("ccca_membership_due_in_cents")
+  earlyRegistrationEndDate                         DateTime?                @map("early_registration_end_date") @db.Date
+  earlyRegistrationTuitionInCents                  Int                      @default(38000) @map("early_registration_tuition_in_cents")
+  tuitionDiscountForThreeOrMoreChildInCents        Int                      @default(3800) @map("tuition_discount_for_three_or_more_child_in_cents")
+  tuitionDiscountForPreKInCents                    Int                      @default(4000) @map("tuition_discount_for_pre_k_in_cents")
+  previousSchoolYearId                             Int?                     @map("previous_school_year_id")
+  earlyRegistrationStartDate                       DateTime?                @map("early_registration_start_date") @db.Date
+  tuitionDiscountForInstructorInCents              Int                      @default(0) @map("tuition_discount_for_instructor_in_cents")
+  refund90PercentDate                              DateTime?                @map("refund_90_percent_date") @db.Date
+  autoClassAssignment                              Boolean                  @default(false) @map("auto_class_assignment")
+  parentAndStudentClassFeeInCents                  Int                      @default(0) @map("parent_and_student_class_fee_in_cents")
+  electiveClassFeeInCents                          Int                      @default(5000) @map("elective_class_fee_in_cents")
+  earlyRegistrationParentAndStudentClassFeeInCents Int                      @default(0) @map("early_registration_parent_and_student_class_fee_in_cents")
+  bookCharges                                      BookCharge[]             @relation("BookChargeSchoolYearId")
+  instructorAssignments                            InstructorAssignment[]   @relation("InstructorAssignmentSchoolYearId")
+  registrationPayments                             RegistrationPayment[]    @relation("RegistrationPaymentSchoolYearId")
+  registrationPreferences                          RegistrationPreference[] @relation("RegistrationPreferenceSchoolYearId")
+  schoolClassActiveFlags                           SchoolClassActiveFlag[]  @relation("SchoolClassActiveFlagSchoolYearId")
+  previousSchoolYear                               SchoolYear?              @relation("SchoolYearPreviousSchoolYearId", fields: [previousSchoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  nextSchoolYears                                  SchoolYear[]             @relation("SchoolYearPreviousSchoolYearId")
+  staffAssignments                                 StaffAssignment[]        @relation("StaffAssignmentSchoolYearId")
+  studentClassAssignments                          StudentClassAssignment[] @relation("StudentClassAssignmentSchoolYearId")
+  studentFinalMarks                                StudentFinalMark[]       @relation("StudentFinalMarkSchoolYearId")
+  studentStatusFlags                               StudentStatusFlag[]      @relation("StudentStatusFlagSchoolYearId")
+  withdrawRequests                                 WithdrawRequest[]        @relation("WithdrawRequestSchoolYearId")
+  withdrawalRecords                                WithdrawalRecord[]       @relation("WithdrawalRecordSchoolYearId")
+
+  @@map("school_years")
+}
+
+model StaffAssignment {
+  id           Int        @id @default(autoincrement())
+  schoolYearId Int        @map("school_year_id")
+  personId     Int        @map("person_id")
+  role         String?    @db.VarChar(255)
+  startDate    DateTime?  @map("start_date") @db.Date
+  endDate      DateTime?  @map("end_date") @db.Date
+  createdAt    DateTime   @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime   @map("updated_at") @db.Timestamp(6)
+  schoolYear   SchoolYear @relation("StaffAssignmentSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  person       Person     @relation("StaffAssignmentPersonId", fields: [personId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("staff_assignments")
+}
+
+model StudentClassAssignment {
+  id              Int          @id @default(autoincrement())
+  studentId       Int?         @map("student_id")
+  gradeId         Int?         @map("grade_id")
+  schoolClassId   Int?         @map("school_class_id")
+  electiveClassId Int?         @map("elective_class_id")
+  createdAt       DateTime?    @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime?    @map("updated_at") @db.Timestamp(6)
+  schoolYearId    Int?         @map("school_year_id")
+  schoolYear      SchoolYear?  @relation("StudentClassAssignmentSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student         Person?      @relation("StudentClassAssignmentStudentId", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  grade           Grade?       @relation("StudentClassAssignmentGradeId", fields: [gradeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolClass     SchoolClass? @relation("StudentClassAssignmentSchoolClassId", fields: [schoolClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  electiveClass   SchoolClass? @relation("StudentClassAssignmentElectiveClassId", fields: [electiveClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("student_class_assignments")
+}
+
+model StudentFeePayment {
+  id                      Int                  @id @default(autoincrement())
+  registrationPaymentId   Int?                 @map("registration_payment_id")
+  studentId               Int?                 @map("student_id")
+  registrationFeeInCents  Int?                 @map("registration_fee_in_cents")
+  tuitionInCents          Int?                 @map("tuition_in_cents")
+  bookChargeInCents       Int?                 @map("book_charge_in_cents")
+  earlyRegistration       Boolean              @default(false) @map("early_registration")
+  multipleChildDiscount   Boolean              @default(false) @map("multiple_child_discount")
+  preKDiscount            Boolean              @default(false) @map("pre_k_discount")
+  createdAt               DateTime?            @map("created_at") @db.Timestamp(6)
+  updatedAt               DateTime?            @map("updated_at") @db.Timestamp(6)
+  prorate75               Boolean              @default(false) @map("prorate_75")
+  prorate50               Boolean              @default(false) @map("prorate_50")
+  instructorDiscount      Boolean              @default(false) @map("instructor_discount")
+  staffDiscount           Boolean              @default(false) @map("staff_discount")
+  electiveClassFeeInCents Int                  @default(0) @map("elective_class_fee_in_cents")
+  registrationPayment     RegistrationPayment? @relation("StudentFeePaymentRegistrationPaymentId", fields: [registrationPaymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student                 Person?              @relation("StudentFeePaymentStudentId", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("student_fee_payments")
+}
+
+model StudentFinalMark {
+  id              Int         @id @default(autoincrement())
+  schoolYearId    Int         @map("school_year_id")
+  schoolClassId   Int         @map("school_class_id")
+  studentId       Int         @map("student_id")
+  topThree        Int?        @map("top_three")
+  progressAward   Boolean     @default(false) @map("progress_award")
+  spiritAward     Boolean     @default(false) @map("spirit_award")
+  attendanceAward Boolean     @default(false) @map("attendance_award")
+  totalScore      Float?      @map("total_score")
+  createdAt       DateTime    @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime    @map("updated_at") @db.Timestamp(6)
+  talentAward     Boolean?    @map("talent_award")
+  schoolYear      SchoolYear  @relation("StudentFinalMarkSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student         Person      @relation("StudentFinalMarkStudentId", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolClass     SchoolClass @relation("StudentFinalMarkSchoolClassId", fields: [schoolClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("student_final_marks")
+}
+
+model StudentStatusFlag {
+  id                   Int         @id @default(autoincrement())
+  studentId            Int?        @map("student_id")
+  schoolYearId         Int?        @map("school_year_id")
+  lastStatusChangeDate DateTime?   @map("last_status_change_date") @db.Date
+  registered           Boolean     @default(false)
+  createdAt            DateTime?   @map("created_at") @db.Timestamp(6)
+  updatedAt            DateTime?   @map("updated_at") @db.Timestamp(6)
+  student              Person?     @relation("StudentStatusFlagStudentId", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolYear           SchoolYear? @relation("StudentStatusFlagSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("student_status_flags")
+}
+
+model TimedToken {
+  id         Int       @id @default(autoincrement())
+  token      String?   @db.VarChar(255)
+  personId   Int?      @map("person_id")
+  expiration DateTime? @db.Timestamp(6)
+  createdAt  DateTime? @map("created_at") @db.Timestamp(6)
+  updatedAt  DateTime? @map("updated_at") @db.Timestamp(6)
+  person     Person?   @relation("TimedTokenPersonId", fields: [personId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("timed_tokens")
+}
+
+model User {
+  id           Int        @id @default(autoincrement())
+  username     String?    @db.VarChar(255)
+  passwordHash String?    @map("password_hash") @db.VarChar(255)
+  passwordSalt String?    @map("password_salt") @db.VarChar(255)
+  personId     Int?       @map("person_id")
+  createdAt    DateTime?  @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime?  @map("updated_at") @db.Timestamp(6)
+  rolesUsers   RoleUser[] @relation("RoleUserUserId")
+  person       Person?    @relation("UserPersonId", fields: [personId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("users")
+}
+
+model WithdrawRequestDetail {
+  id                            Int              @id @default(autoincrement())
+  withdrawRequestId             Int?             @map("withdraw_request_id")
+  studentId                     Int?             @map("student_id")
+  refundRegistrationFeeInCents  Int?             @map("refund_registration_fee_in_cents")
+  refundTuitionInCents          Int?             @map("refund_tuition_in_cents")
+  refundBookChargeInCents       Int?             @map("refund_book_charge_in_cents")
+  createdAt                     DateTime         @map("created_at") @db.Timestamp(6)
+  updatedAt                     DateTime         @map("updated_at") @db.Timestamp(6)
+  refundElectiveClassFeeInCents Int              @default(0) @map("refund_elective_class_fee_in_cents")
+  electiveClassFeeInCents       Int              @default(0) @map("elective_class_fee_in_cents")
+  electiveClassOnly             String?          @default("N") @map("elective_class_only") @db.VarChar(255)
+  withdrawRequest               WithdrawRequest? @relation("WithdrawRequestDetailWithdrawRequestId", fields: [withdrawRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student                       Person?          @relation("WithdrawRequestDetailStudentId", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("withdraw_request_details")
+}
+
+model WithdrawRequest {
+  id                      Int                     @id @default(autoincrement())
+  requestById             Int?                    @map("request_by_id")
+  requestByName           String?                 @map("request_by_name") @db.VarChar(255)
+  requestByAddress        String?                 @map("request_by_address") @db.VarChar(255)
+  schoolYearId            Int?                    @map("school_year_id")
+  refundPvaDueInCents     Int?                    @map("refund_pva_due_in_cents")
+  refundCccaDueInCents    Int?                    @map("refund_ccca_due_in_cents")
+  refundGrandTotalInCents Int?                    @map("refund_grand_total_in_cents")
+  statusCode              String?                 @map("status_code") @db.VarChar(255)
+  statusById              Int?                    @map("status_by_id")
+  createdAt               DateTime                @map("created_at") @db.Timestamp(6)
+  updatedAt               DateTime                @map("updated_at") @db.Timestamp(6)
+  requestByHomePhone      String?                 @map("request_by_home_phone") @db.VarChar(255)
+  withdrawRequestDetails  WithdrawRequestDetail[] @relation("WithdrawRequestDetailWithdrawRequestId")
+  requestBy               Person?                 @relation("WithdrawRequestRequestById", fields: [requestById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  statusBy                Person?                 @relation("WithdrawRequestStatusById", fields: [statusById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolYear              SchoolYear?             @relation("WithdrawRequestSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("withdraw_requests")
+}
+
+model WithdrawalRecord {
+  id               Int          @id @default(autoincrement())
+  studentId        Int?         @map("student_id")
+  schoolYearId     Int?         @map("school_year_id")
+  gradeId          Int?         @map("grade_id")
+  schoolClassId    Int?         @map("school_class_id")
+  electiveClassId  Int?         @map("elective_class_id")
+  registrationDate DateTime?    @map("registration_date") @db.Date
+  withdrawalDate   DateTime?    @map("withdrawal_date") @db.Date
+  createdAt        DateTime?    @map("created_at") @db.Timestamp(6)
+  updatedAt        DateTime?    @map("updated_at") @db.Timestamp(6)
+  student          Person?      @relation("WithdrawalRecordStudentId", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolYear       SchoolYear?  @relation("WithdrawalRecordSchoolYearId", fields: [schoolYearId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  grade            Grade?       @relation("WithdrawalRecordGradeId", fields: [gradeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schoolClass      SchoolClass? @relation("WithdrawalRecordSchoolClassId", fields: [schoolClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  electiveClass    SchoolClass? @relation("WithdrawalRecordElectiveClassId", fields: [electiveClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("withdrawal_records")
+}
