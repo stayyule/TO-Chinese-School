@@ -2,6 +2,7 @@
 
 - 状态：**草案，待协同审阅**（Draft for review）
 - 对应英文版：[REQUIREMENTS.en.md](REQUIREMENTS.en.md)（章节与 FR/BR/SEC 编号一一对应）
+- 繁体中文版：[REQUIREMENTS.zh-TW.md](REQUIREMENTS.zh-TW.md)（内容相同，仅字体与用语不同）
 - 待决问题清单：[REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md)
 - 本文档**不包含任何实现**，也**不预设技术方案**；技术选型仅在附录 A 中对比。
 - 依据：对现有系统 `chineseschool/`（Rails 3.2.13 + PostgreSQL）的只读分析。需求条目末尾的“来源”为现有代码路径，便于审阅者核对。

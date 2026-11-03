@@ -2,6 +2,7 @@
 
 - Status: **Draft for collaborative review**
 - Chinese version: [REQUIREMENTS.zh-CN.md](REQUIREMENTS.zh-CN.md) (section and FR/BR/SEC numbering match one-to-one)
+- Traditional Chinese version: [REQUIREMENTS.zh-TW.md](REQUIREMENTS.zh-TW.md) (same content as the Simplified version)
 - Open questions: [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md)
 - This document contains **no implementation** and **does not presuppose a technology choice**; options are compared only in Appendix A.
 - Basis: read-only analysis of the existing system `chineseschool/` (Rails 3.2.13 + PostgreSQL). The "Source" lines cite existing code paths so reviewers can verify each item.
