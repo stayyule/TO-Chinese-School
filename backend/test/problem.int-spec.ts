@@ -60,6 +60,7 @@ describe('problem errors', () => {
     expect(nf.status).toBe(404);
     expect(nf.body.code).toBe('NOT_FOUND');
     const bad = await request(app.getHttpServer()).get('/api/v1/boom/bad');
+    expect(bad.status).toBe(422);
     expect(bad.body.code).toBe('VALIDATION_ERROR');
     expect(bad.body.details).toEqual(['field must be string']);
   });

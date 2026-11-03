@@ -37,6 +37,7 @@ export class ProblemFilter implements ExceptionFilter {
         const b = body as { message?: unknown; error?: unknown };
         if (Array.isArray(b.message)) {
           // class-validator style: list of violations.
+          status = 422;
           code = 'VALIDATION_ERROR';
           message = 'Validation failed';
           details = b.message;
