@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import type { User } from '@prisma/client';
 import type { CookieOptions, Response } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AppError } from '../common/errors';
@@ -49,23 +50,30 @@ export class AuthController {
   ): Promise<{ userId: number }> {
     const username = dto.username.trim(); // old system stripped; lookup stays case-sensitive
     const ip = req.ip;
+
+    // Lockout check, verification and the audit write are serialized per username (see withUsernameLock).
+    let outcome: { user: User | null; ok: boolean; needsUpgrade: boolean };
     try {
-      await this.throttle.assertAllowed(username);
+      outcome = await this.throttle.withUsernameLock(username, async (tx) => {
+        await this.throttle.assertAllowed(username, tx);
+        // users.username is not unique in the legacy schema; the old find_by_username took the first row.
+        const user = await tx.user.findFirst({ where: { username }, orderBy: { id: 'asc' } });
+        const result = await this.passwords.verify(dto.password, user ?? NO_PASSWORD);
+        const ok = user !== null && result.ok;
+        const action = ok ? 'auth.login_succeeded' : 'auth.login_failed';
+        await this.audit.record({ action, actorUserId: user?.id, actorUsername: username, ip }, tx);
+        return { user, ok, needsUpgrade: result.needsUpgrade };
+      });
     } catch (e) {
       if (e instanceof AppError && e.code === 'LOGIN_LOCKED') {
         res.setHeader('Retry-After', String((e.details as { retryAfterSeconds: number }).retryAfterSeconds));
       }
       throw e;
     }
+    const { user, ok, needsUpgrade } = outcome;
+    if (!user || !ok) throw invalidCredentials();
 
-    // users.username is not unique in the legacy schema; the old find_by_username took the first row.
-    const user = await this.prisma.user.findFirst({ where: { username }, orderBy: { id: 'asc' } });
-    const result = await this.passwords.verify(dto.password, user ?? NO_PASSWORD);
-    if (!user || !result.ok) {
-      await this.audit.record({ action: 'auth.login_failed', actorUserId: user?.id, actorUsername: username, ip });
-      throw invalidCredentials();
-    }
-    if (result.needsUpgrade) {
+    if (needsUpgrade) {
       // Silent upgrade; legacy password_hash/password_salt stay untouched until the upgrade deadline.
       await this.prisma.user.update({ where: { id: user.id }, data: { passwordHashV2: await this.passwords.hash(dto.password) } });
     }
@@ -73,7 +81,6 @@ export class AuthController {
     const presented: unknown = req.cookies?.[SESSION_COOKIE];
     if (typeof presented === 'string' && presented !== '') await this.sessions.destroy(presented);
     const session = await this.sessions.create(user.id, { ip, userAgent: req.get('user-agent') });
-    await this.audit.record({ action: 'auth.login_succeeded', actorUserId: user.id, actorUsername: username, ip });
     // Browser-side lifetime = absolute lifetime; the 8 h idle limit is enforced server-side.
     res.cookie(SESSION_COOKIE, session.id, { ...SESSION_COOKIE_OPTIONS, maxAge: SESSION_ABSOLUTE_MS });
     return { userId: user.id };

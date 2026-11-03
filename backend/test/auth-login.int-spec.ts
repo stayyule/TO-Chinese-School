@@ -137,6 +137,8 @@ describe('auth: login, sessions, CSRF, throttling (app connected as tocs_app)', 
   it('really runs the app as the restricted tocs_app role', async () => {
     const rows = await appPrisma.$queryRaw<{ u: string }[]>`SELECT current_user::text AS u`;
     expect(rows[0].u).toBe('tocs_app');
+    const roles = await appPrisma.$queryRaw<{ s: boolean }[]>`SELECT rolsuper AS s FROM pg_roles WHERE rolname = current_user`;
+    expect(roles).toEqual([{ s: false }]);
   });
 
   it('logs a legacy user in, sets a hardened session cookie, upgrades the hash silently and audits', async () => {
@@ -217,6 +219,60 @@ describe('auth: login, sessions, CSRF, throttling (app connected as tocs_app)', 
 
     clock.advanceMs(15 * 60_000 + 1000);
     await loginOk('alice', 'Pa55word!x', newIp());
+  });
+
+  it('locks unknown usernames the same way, with a 429 body identical to a real locked user', async () => {
+    for (let i = 0; i < 5; i++) {
+      expect((await login('alice', 'wrong-password', newIp())).status).toBe(401);
+      expect((await login('nobody', 'wrong-password', newIp())).status).toBe(401);
+    }
+    const real = await login('alice', 'Pa55word!x', newIp());
+    const unknown = await login('nobody', 'whatever-pass', newIp());
+    expect(real.status).toBe(429);
+    expect(unknown.status).toBe(429);
+    expect(unknown.headers['retry-after']).toBe(real.headers['retry-after']);
+    const strip = (b: Record<string, unknown>) => ({ ...b, requestId: undefined });
+    expect(strip(unknown.body)).toEqual(strip(real.body));
+  });
+
+  it('serializes concurrent attempts per username: 8 parallel wrong passwords give exactly 5 failures and 3 lockouts', async () => {
+    // Distinct client IPs so the per-IP throttler cannot mask the effect.
+    const attempts = await Promise.all(
+      Array.from({ length: 8 }, async (_, i) => {
+        const ip = newIp();
+        return { ip, csrf: await csrfFor(ip), i };
+      }),
+    );
+    const results = await Promise.all(
+      attempts.map(({ ip, csrf, i }) =>
+        http()
+          .post('/api/v1/auth/login')
+          .set('X-Forwarded-For', ip)
+          .set('Cookie', csrf.cookie)
+          .set('X-CSRF-Token', csrf.token)
+          .send({ username: i % 2 ? 'alice' : ' ALICE ', password: 'wrong-password' }),
+      ),
+    );
+    const codes = results.map((r) => `${r.status} ${r.body.code}`).sort();
+    expect(codes).toEqual([
+      ...Array<string>(5).fill('401 INVALID_CREDENTIALS'),
+      ...Array<string>(3).fill('429 LOGIN_LOCKED'),
+    ]);
+    expect(await admin.auditLog.count({ where: { action: 'auth.login_failed' } })).toBe(5);
+  });
+
+  it('rejects a whitespace-only username with 422 and writes no audit row', async () => {
+    const ip = newIp();
+    const { token, cookie } = await csrfFor(ip);
+    const res = await http()
+      .post('/api/v1/auth/login')
+      .set('X-Forwarded-For', ip)
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', token)
+      .send({ username: '   ', password: 'whatever-pass' });
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+    expect(await admin.auditLog.count()).toBe(0);
   });
 
   it('rejects non-GET requests without a matching CSRF header with 403 CSRF_INVALID', async () => {
