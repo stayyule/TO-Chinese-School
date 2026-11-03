@@ -3,7 +3,7 @@ import type { Prisma, SchoolYear } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { Clock } from '../common/clock';
 import { AppError } from '../common/errors';
-import { PacificDate, toDbDate } from '../common/pacific-date';
+import { PacificDate, pacificDate, toDbDate } from '../common/pacific-date';
 import { validationProblem } from '../people/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { toRow } from './school-year.lookup';
@@ -48,7 +48,8 @@ function columns(input: SchoolYearInput): Prisma.SchoolYearUncheckedUpdateInput 
     description: input.description?.trim() || null,
     ageCutoffMonth: input.ageCutoffMonth ?? null,
   };
-  for (const f of DATE_FIELDS) data[f] = input[f] ? toDbDate(input[f] as PacificDate) : null;
+  // pacificDate() re-validates and returns the canonical YYYY-MM-DD string, so nothing else reaches the database.
+  for (const f of DATE_FIELDS) data[f] = input[f] ? toDbDate(pacificDate(input[f])) : null;
   for (const f of FEE_KEYS) data[FEE_FIELDS[f]] = input[f];
   return data as Prisma.SchoolYearUncheckedUpdateInput;
 }

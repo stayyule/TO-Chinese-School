@@ -223,9 +223,35 @@ describe('school year administration API (app connected as tocs_app)', () => {
         call('post', '/school-years', sidReg, body({ name: 'B', startDate: '2029-06-01', endDate: '2030-06-01' })),
       ]);
       expect([a.status, b.status]).toEqual([201, 201]);
-      // B starts when A ends, so B must point at A whichever committed first.
+      // Which one committed first is not deterministic: B points at A or at the older year, A at the older year.
+      expect([currentId, b.body.id]).toContain(a.body.previousSchoolYearId);
+      expect([currentId, a.body.id]).toContain(b.body.previousSchoolYearId);
+      expect(a.body.previousSchoolYearId).not.toBe(a.body.id);
+      expect(b.body.previousSchoolYearId).not.toBe(b.body.id);
+      // no cycle
+      expect(a.body.previousSchoolYearId === b.body.id && b.body.previousSchoolYearId === a.body.id).toBe(false);
+      const ids = (await admin.schoolYear.findMany({ select: { id: true } })).map((y) => y.id);
+      for (const link of [a.body.previousSchoolYearId, b.body.previousSchoolYearId]) expect(ids).toContain(link);
+    });
+
+    it('sequential creates chain: a later year points at the one just created', async () => {
+      const a = await call('post', '/school-years', sidReg, body({ name: 'A', startDate: '2028-09-01', endDate: '2029-06-01' }));
+      const b = await call('post', '/school-years', sidReg, body({ name: 'B', startDate: '2029-06-01', endDate: '2030-06-01' }));
       expect(a.body.previousSchoolYearId).toBe(currentId);
       expect(b.body.previousSchoolYearId).toBe(a.body.id);
+    });
+
+    it.each(['2026-9-6', ' 2026-09-06', '2026-09-06 ', '2026/09/06'])('rejects non-canonical date %j with 422 keyed startDate', async (d) => {
+      const res = await call('post', '/school-years', sidReg, body({ startDate: d }));
+      expect(res.status).toBe(422);
+      expect(res.body.details.startDate).toBe('INVALID');
+      expect(await admin.schoolYear.count()).toBe(2);
+    });
+
+    it('rejects a fee above int4 max with OUT_OF_RANGE keyed tuition', async () => {
+      const res = await call('post', '/school-years', sidReg, body({ tuition: 2147483648 }));
+      expect(res.status).toBe(422);
+      expect(res.body.details.tuition).toBe('OUT_OF_RANGE');
     });
 
     it('422s invalid input keyed by field and creates nothing', async () => {
@@ -275,6 +301,17 @@ describe('school year administration API (app connected as tocs_app)', () => {
       expect(res.status).toBe(200);
       // startDate 2026-09-06 has passed (frozen); refund90 (today) and endDate (future) change.
       expect(res.body).toMatchObject({ startDate: '2026-09-06', refund90PercentDate: '2026-12-01', endDate: '2027-06-07', previousSchoolYearId: pastId });
+    });
+
+    it('refund90PercentDate is frozen when stored past, editable when stored future or empty (D5)', async () => {
+      const past = await call('patch', `/school-years/${pastId}`, sidReg, { refund90PercentDate: '2030-01-01' });
+      expect(past.body.refund90PercentDate).toBe('2024-09-01');
+      await admin.schoolYear.update({ where: { id: currentId }, data: { refund90PercentDate: dbDate('2027-01-01') } });
+      const future = await call('patch', `/school-years/${currentId}`, sidReg, { refund90PercentDate: '2027-02-02' });
+      expect(future.body.refund90PercentDate).toBe('2027-02-02');
+      await admin.schoolYear.update({ where: { id: currentId }, data: { refund90PercentDate: null } });
+      const empty = await call('patch', `/school-years/${currentId}`, sidReg, { refund90PercentDate: '2027-03-03' });
+      expect(empty.body.refund90PercentDate).toBe('2027-03-03');
     });
 
     it('validates the merged result', async () => {
