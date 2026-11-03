@@ -15,7 +15,7 @@
 将现有 Rails 3.2 系统用其他框架重写，**保持相同的业务逻辑**，并改为前后端分离、可自动化运维、部署在单台 Ubuntu 云服务器。
 
 ### 1.2 范围内
-账号与权限、人员与家庭、学年配置、年级与班级、分班与教师分配、注册与收费、退课与退费、财务与对账、期末成绩、图书借阅、通信表格、邮件通知、报表与导出。
+账号与权限、人员与家庭、学年配置、年级与班级、分班与教师分配、注册与收费、退课与退费、财务与对账、期末成绩、通信表格、邮件通知、报表与导出。
 
 ### 1.3 范围外（明确不重写）
 **田径比赛（Track Event）功能整体删除**，包括：
@@ -30,11 +30,13 @@
 | 首页入口 | 首页角色面板 `_activity_officer` 中与田径相关的入口 |
 
 > 注：`activity/forms`（消防演习表、班级信息、按班级学生名单）不属于田径功能，按 Q-01 决定**全部保留**（见 FR-COM-03）。
+>
+> **图书借阅功能同样不重写**（2026-11-02 决定，见 3.7）：路由 `librarian/*`，模型 `LibraryBook`、`LibraryBookCheckout`，数据表 `library_books`、`library_book_checkouts`，图书检索结果 PDF 模板，首页图书管理员面板，以及图书管理员角色。
 
 ### 1.4 已确认的约束
 | 编号 | 约束 |
 |------|------|
-| C-1 | 沿用现有 PostgreSQL 数据库与表结构（删除田径相关 5 张表后约 31 张表），不做数据迁移 |
+| C-1 | 沿用现有 PostgreSQL 数据库与表结构（删除田径 5 张表和图书 2 张表后约 29 张表），不做数据迁移 |
 | C-2 | 前后端分离：后端提供 REST API，前端为单页应用 |
 | C-3 | 目标环境为**单台 Ubuntu 云服务器**，应用与数据库同机 |
 | C-4 | 需要自动化运维（容器化、CI/CD、自动迁移、监控、备份） |
@@ -57,7 +59,6 @@
 | PVA | 家长会相关（接收退课通知等） |
 | 通信官（Communication Officer） | 拍照同意书、年鉴学生名单 |
 | 活动官（Activity Officer） | 表格类功能（田径已删除；表格类按 Q-01 保留） |
-| 图书管理员（Librarian） | 图书与借阅 |
 | 系统管理员 | 学年、年级、班级、角色/权限、邀请注册 |
 
 - **FR-AUTH-05**：权限为“角色 → 权限码”模型，服务端对每个接口强制校验；一个用户可拥有多个角色。
@@ -149,15 +150,11 @@
 
 来源：`instruction/*`，`school_year.rb#start_date_for_entering_student_final_mark`
 
-### 3.7 图书（LIB）
+### 3.7 图书（LIB）— 已删除（范围外）
 
-| 编号 | 需求 | 优先级 | 验收标准 |
-|------|------|--------|----------|
-| FR-LIB-01 | 图书列表、新增图书、只读视图 | M | — |
-| FR-LIB-02 | 借还记录 | M | 记录借出人、时间 |
-| FR-LIB-03 | 按学生检索并导出结果（PDF） | S | — |
+2026-11-02 决定：图书借阅功能整体不重写，原 FR-LIB-01（图书列表/新增/只读视图）、FR-LIB-02（借还记录）、FR-LIB-03（按学生检索并导出 PDF）全部取消。保留 3.7 编号以避免后续章节与评审清单的编号变动。
 
-来源：`librarian/*`、`library_books`、`library_book_checkouts`
+来源（仅供核对）：`librarian/*`、`library_books`、`library_book_checkouts`
 
 ### 3.8 通信与表格（COM）
 
@@ -250,10 +247,11 @@
 ## 5. 数据需求
 
 - 沿用现有 PostgreSQL 表结构（C-1）。保留的核心表：
-  `addresses`、`book_charges`、`families`、`families_children`、`gateway_transactions`、`grades`、`in_person_registration_transactions`、`instructor_assignments`、`library_book_checkouts`、`library_books`、`manual_transactions`、`people`、`registration_payments`、`registration_preferences`、`rights`、`rights_roles`、`roles`、`roles_users`、`school_class_active_flags`、`school_classes`、`school_years`、`staff_assignments`、`student_class_assignments`、`student_fee_payments`、`student_final_marks`、`student_status_flags`、`timed_tokens`、`users`、`withdraw_request_details`、`withdraw_requests`、`withdrawal_records`。
-- 删除（范围外）：`track_event_heats`、`track_event_programs`、`track_event_signups`、`track_event_teams`、`jersey_numbers`。（Q-12 已决，2026-11-02）新系统**不迁移**这些表，不纳入数据模型，不得读写。它们在生产库中是切换时物理删除还是保留不碰，尚待定。
+  `addresses`、`book_charges`、`families`、`families_children`、`gateway_transactions`、`grades`、`in_person_registration_transactions`、`instructor_assignments`、`manual_transactions`、`people`、`registration_payments`、`registration_preferences`、`rights`、`rights_roles`、`roles`、`roles_users`、`school_class_active_flags`、`school_classes`、`school_years`、`staff_assignments`、`student_class_assignments`、`student_fee_payments`、`student_final_marks`、`student_status_flags`、`timed_tokens`、`users`、`withdraw_request_details`、`withdraw_requests`、`withdrawal_records`。
+- 删除（范围外）：`track_event_heats`、`track_event_programs`、`track_event_signups`、`track_event_teams`、`jersey_numbers`。（Q-12 已决，2026-11-02）新系统**不迁移**这些表，不纳入数据模型，不得读写。它们在生产库中**保留不碰**（不读不写，不迁移这部分数据）。
+- 删除（范围外，2026-11-02）：`library_books`、`library_book_checkouts`（图书借阅功能不重写）。处理方式与田径表相同：新系统不纳入数据模型、不得读写，生产库中保留不碰，不迁移这部分数据。
 - **DATA-01 无 id 联结表**：`families_children(family_id, child_id)`、`rights_roles`、`roles_users`。
-- **DATA-02 非常规外键**：`families.parent_one_id/parent_two_id`；`registration_payments.paid_by_id`、`withdraw_requests.request_by_id/status_by_id`、`library_book_checkouts.checked_out_by_id` 等指向 `people`。
+- **DATA-02 非常规外键**：`families.parent_one_id/parent_two_id`；`registration_payments.paid_by_id`、`withdraw_requests.request_by_id/status_by_id` 等指向 `people`。
 - **DATA-03 金额**：全部 `*_in_cents` 整数；新系统不得使用浮点存储或计算金额。
 - **DATA-04 用户表密码字段**：`password_hash`（`SHA256(password+salt)` 十六进制）、`password_salt`。（Q-08 已决）新增 `password_hash_v2` 存 argon2id 字符串；旧两列保留到升级截止日后清空并删除。
 - **DATA-05 现有数据库中 `db/schema.rb` 为准**，迁移文件不完整（最早 2014 年）；审阅前需拿到脱敏的生产库结构副本核对。
@@ -266,7 +264,7 @@
 |------|------|------|------|
 | INT-01 | 支付网关 | ActiveMerchant → Authorize.net（`AUTHORIZE_NET_GATEWAY` 常量不在仓库，凭据在服务器上）；卡号不落库，仅存类型/末四位 | 保留功能（Q-02 已决）：继续使用 Authorize.net；改为嵌入式令牌化，卡号由浏览器直接发给网关换令牌，后端只用令牌扣款；支付封装在接口后；凭据改环境变量；见 SEC-05 |
 | INT-02 | 邮件 | SMTP；共 4 个 Mailer、10 个模板 | 保留（Q-07 已决）：事务邮件服务（优先 Postmark，或 Amazon SES），经标准 SMTP 对接；发件域名 `to-cs.org`，沿用现有发件地址；SPF/DKIM/DMARC 见 SEC-15 |
-| INT-03 | PDF | 7 个 Prawn 模板，其中 2 个属田径（删除）；保留：班级名单×2、图书检索结果、拍照同意书、消防演习表（Q-01 已决：保留，共 5 个） | 保留，含中文字体 |
+| INT-03 | PDF | 7 个 Prawn 模板，其中 2 个属田径（删除）、1 个图书检索结果（删除）；保留：班级名单×2、拍照同意书、消防演习表（Q-01 已决：保留，共 4 个） | 保留，含中文字体 |
 | INT-04 | CSV | 控制器内联生成（成绩下载、班级信息、学生名单等） | 保留 |
 | INT-05 | `data-export/` 脚本 | 独立 Sequel + MySQL 脚本，需手改学年 id 与凭据 | （Q-09 已决）13 个脚本全部迁为后端“报表导出”模块，输出 CSV；学年为页面参数；每个报表有显式权限码；每次导出写审计日志；田径脚本随功能删除。核心功能先做，报表后一期 |
 
@@ -332,7 +330,7 @@
 - **MIG-03 金额黄金用例**：由旧系统对固定输入（含日期边界、多孩、员工/教师、迟报、亲子班）产出学费/会费/退款金额表，作为新系统必须通过的用例。
 - **MIG-04 并行验证**（Q-05 已决，2026-11-02）：新系统只连接生产库的**脱敏副本**，对比人员/班级/交易汇总报表与旧系统输出；新旧系统不共用生产库。
 - **MIG-06 切换**（Q-05 已决）：验证通过后，在低峰期（两次注册期之间，避开早鸟截止日）停止旧系统、做最终备份，由新系统一次性接管旧库；任何时刻只有一个系统写库。
-- **MIG-05 田径数据**（Q-12 已决）：不迁移，新系统数据模型不含这 5 张表，`grades.jersey_number_prefix` 列同样忽略。库中物理删除或保留不碰待定；若保留，应用账号不授予其权限，且迁移工具不得自动 `DROP`。
+- **MIG-05 田径数据**（Q-12 已决）：不迁移，新系统数据模型不含这 5 张表，`grades.jersey_number_prefix` 列同样忽略。这 5 张表以及图书 2 张表（共 7 张）在生产库中保留不碰、不迁移：应用账号不授予其权限，Prisma baseline 排除它们，迁移工具不得自动 `DROP`。
 
 ---
 

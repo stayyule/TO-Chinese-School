@@ -15,7 +15,7 @@
 Rewrite the existing Rails 3.2 system on another framework, **keeping the same business logic**, with a separated front end and back end, automated operations, deployed on a single Ubuntu cloud server.
 
 ### 1.2 In scope
-Accounts and permissions, people and families, school-year configuration, grades and classes, class and instructor assignment, registration and payment, withdrawal and refund, accounting, final marks, library, communication forms, e-mail notifications, reports and exports.
+Accounts and permissions, people and families, school-year configuration, grades and classes, class and instructor assignment, registration and payment, withdrawal and refund, accounting, final marks, communication forms, e-mail notifications, reports and exports.
 
 ### 1.3 Out of scope (explicitly not rewritten)
 **The entire Track Event (athletics meet) feature is removed**, including:
@@ -30,11 +30,13 @@ Accounts and permissions, people and families, school-year configuration, grades
 | Home page | Track-related entries in the `_activity_officer` role panel |
 
 > Note: `activity/forms` (fire drill form, class information, students by class) is not part of the track feature; per Q-01 it is **kept** (see FR-COM-03).
+>
+> **The library feature is not rewritten either** (decided 2026-11-02, see 3.7): the `librarian/*` routes, the `LibraryBook` and `LibraryBookCheckout` models, the `library_books` and `library_book_checkouts` tables, the library search result PDF template, the Librarian panel on the home page, and the Librarian role.
 
 ### 1.4 Confirmed constraints
 | ID | Constraint |
 |----|------------|
-| C-1 | Keep the existing PostgreSQL database and schema (about 31 tables after removing the 5 track tables); no data migration |
+| C-1 | Keep the existing PostgreSQL database and schema (about 29 tables after removing the 5 track tables and the 2 library tables); no data migration |
 | C-2 | Separated front end and back end: REST API plus a single-page application |
 | C-3 | Target environment is a **single Ubuntu cloud server** hosting both application and database |
 | C-4 | Automated operations (containers, CI/CD, automatic migration, monitoring, backup) |
@@ -57,7 +59,6 @@ The existing home page renders a panel per role (`app/views/home/_*.html.erb`). 
 | PVA | Parent association (receives withdrawal notifications, etc.) |
 | Communication Officer | Picture-taking form, yearbook student list |
 | Activity Officer | Form-type features (track removed; forms kept per Q-01) |
-| Librarian | Books and checkouts |
 | System administrator | School years, grades, classes, roles/rights, invitations |
 
 - **FR-AUTH-05**: Authorization is a role → permission-code model, enforced server-side on every endpoint; a user may hold multiple roles.
@@ -149,15 +150,11 @@ Source: `admin/*`
 
 Source: `instruction/*`, `school_year.rb#start_date_for_entering_student_final_mark`
 
-### 3.7 Library (LIB)
+### 3.7 Library (LIB) — removed (out of scope)
 
-| ID | Requirement | Pri | Acceptance |
-|----|-------------|-----|------------|
-| FR-LIB-01 | Book list, add book, read-only view | M | — |
-| FR-LIB-02 | Checkout / return records | M | Records borrower and time |
-| FR-LIB-03 | Search by student and export results (PDF) | S | — |
+Decided 2026-11-02: the library feature is not rewritten. FR-LIB-01 (book list / add / read-only view), FR-LIB-02 (checkout / return records) and FR-LIB-03 (search by student and export PDF) are all cancelled. The 3.7 number is kept so that later section numbers and the review checklist do not shift.
 
-Source: `librarian/*`, `library_books`, `library_book_checkouts`
+Source (for reference only): `librarian/*`, `library_books`, `library_book_checkouts`
 
 ### 3.8 Communication and Forms (COM)
 
@@ -250,10 +247,11 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 ## 5. Data Requirements
 
 - Keep the existing PostgreSQL schema (C-1). Core tables retained:
-  `addresses`, `book_charges`, `families`, `families_children`, `gateway_transactions`, `grades`, `in_person_registration_transactions`, `instructor_assignments`, `library_book_checkouts`, `library_books`, `manual_transactions`, `people`, `registration_payments`, `registration_preferences`, `rights`, `rights_roles`, `roles`, `roles_users`, `school_class_active_flags`, `school_classes`, `school_years`, `staff_assignments`, `student_class_assignments`, `student_fee_payments`, `student_final_marks`, `student_status_flags`, `timed_tokens`, `users`, `withdraw_request_details`, `withdraw_requests`, `withdrawal_records`.
-- Removed (out of scope): `track_event_heats`, `track_event_programs`, `track_event_signups`, `track_event_teams`, `jersey_numbers`. (Q-12 decided, 2026-11-02) The new system does **not migrate** these tables; they are not part of its data model and must never be read or written. Whether they are physically dropped from the production DB at cutover or kept untouched is still open.
+  `addresses`, `book_charges`, `families`, `families_children`, `gateway_transactions`, `grades`, `in_person_registration_transactions`, `instructor_assignments`, `manual_transactions`, `people`, `registration_payments`, `registration_preferences`, `rights`, `rights_roles`, `roles`, `roles_users`, `school_class_active_flags`, `school_classes`, `school_years`, `staff_assignments`, `student_class_assignments`, `student_fee_payments`, `student_final_marks`, `student_status_flags`, `timed_tokens`, `users`, `withdraw_request_details`, `withdraw_requests`, `withdrawal_records`.
+- Removed (out of scope): `track_event_heats`, `track_event_programs`, `track_event_signups`, `track_event_teams`, `jersey_numbers`. (Q-12 decided, 2026-11-02) The new system does **not migrate** these tables; they are not part of its data model and must never be read or written. They are **kept untouched** in the production DB (never read or written, and this data is not migrated).
+- Removed (out of scope, 2026-11-02): `library_books`, `library_book_checkouts` (the library feature is not rewritten). Handled like the track tables: not part of the new data model and never read or written; kept untouched in the production DB, and this data is not migrated.
 - **DATA-01 Join tables without id**: `families_children(family_id, child_id)`, `rights_roles`, `roles_users`.
-- **DATA-02 Non-conventional foreign keys**: `families.parent_one_id/parent_two_id`; `registration_payments.paid_by_id`, `withdraw_requests.request_by_id/status_by_id`, `library_book_checkouts.checked_out_by_id`, etc. point to `people`.
+- **DATA-02 Non-conventional foreign keys**: `families.parent_one_id/parent_two_id`; `registration_payments.paid_by_id`, `withdraw_requests.request_by_id/status_by_id`, etc. point to `people`.
 - **DATA-03 Money**: all `*_in_cents` integers; the new system must not store or compute money in floating point.
 - **DATA-04 Password columns**: `password_hash` (`SHA256(password+salt)` hex) and `password_salt`. (Q-08 decided) Add `password_hash_v2` to hold the argon2id string; keep the two old columns until after the upgrade deadline, then clear and drop them.
 - **DATA-05 `db/schema.rb` is authoritative**; the migration files are incomplete (earliest 2014). A sanitized copy of the production schema must be obtained and compared before review closes.
@@ -266,7 +264,7 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 |----|-------------|---------------|-------------|
 | INT-01 | Payment gateway | ActiveMerchant → Authorize.net (the `AUTHORIZE_NET_GATEWAY` constant is not in the repo; credentials live on the server); card numbers are not stored, only type and last digits | Keep the feature (Q-02 decided): continue with Authorize.net; switch to embedded tokenization so the browser sends the card number straight to the gateway for a token and the back end charges with the token only; payments behind an interface; move credentials to environment variables; see SEC-05 |
 | INT-02 | E-mail | SMTP; 4 mailers, 10 templates | Keep (Q-07 decided): transactional mail service (prefer Postmark, or Amazon SES) via standard SMTP; sending domain `to-cs.org`, keeping the existing From addresses; SPF/DKIM/DMARC see SEC-15 |
-| INT-03 | PDF | 7 Prawn templates, 2 of which are track (removed); kept: class lists ×2, library search result, picture-taking form, fire drill form (Q-01 decided: keep, 5 in total) | Keep, including Chinese font |
+| INT-03 | PDF | 7 Prawn templates, 2 of which are track (removed) and 1 is the library search result (removed); kept: class lists ×2, picture-taking form, fire drill form (Q-01 decided: keep, 4 in total) | Keep, including Chinese font |
 | INT-04 | CSV | Generated inline in controllers (marks download, class information, student lists, etc.) | Keep |
 | INT-05 | `data-export/` scripts | Standalone Sequel + MySQL scripts; school-year id and credentials edited by hand | (Q-09 decided) All 13 scripts move into a back-end report-export module that outputs CSV; school year is a page parameter; each report has an explicit permission code; every export is audit-logged; the track script is dropped with the feature. Core features first, reports one phase later |
 
@@ -332,7 +330,7 @@ Per-student fee = registration fee + tuition + book charge + elective class fee.
 - **MIG-03 Money golden cases**: generate from the old system a table of tuition/dues/refund amounts for fixed inputs (date boundaries, multiple children, staff/instructor, late proration, parent-and-student class); the new system must pass them.
 - **MIG-04 Parallel verification** (Q-05 decided, 2026-11-02): the new system connects only to a **sanitized copy** of the production DB and its people/class/transaction summary reports are compared with the old system's output; the two systems never share the production DB.
 - **MIG-06 Cutover** (Q-05 decided): after sign-off, in a low-traffic window (between registration periods, away from the early-bird deadline), stop the old system, take a final backup, and let the new system take over the DB in one step; only one system writes to the DB at any time.
-- **MIG-05 Track data** (Q-12 decided): not migrated; the new data model excludes these 5 tables and ignores the `grades.jersey_number_prefix` column. Physical drop versus keep-untouched in the production DB is open; if kept, the application account gets no privileges on them and the migration tool must never auto-`DROP`.
+- **MIG-05 Track data** (Q-12 decided): not migrated; the new data model excludes these 5 tables and ignores the `grades.jersey_number_prefix` column. These 5 tables and the 2 library tables (7 in total) are kept untouched and not migrated in the production DB: the application account gets no privileges on them, the Prisma baseline excludes them, and the migration tool must never auto-`DROP`.
 
 ---
 
