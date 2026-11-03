@@ -3,19 +3,24 @@ import { AppLayout } from '../layout/AppLayout'
 import { NotFound } from '../pages/NotFound'
 import { Placeholder } from '../pages/Placeholder'
 import { RequireAuth, Root } from './guards'
-import { PublicPlaceholder } from '../pages/PublicPlaceholder'
-import { SignInPage } from '../pages/SignInPage'
+import { ChangePasswordPage } from '../pages/account/ChangePasswordPage'
+import { ForgotPasswordPage } from '../pages/public/ForgotPasswordPage'
+import { ForgotUsernamePage } from '../pages/public/ForgotUsernamePage'
+import { RegisterPage } from '../pages/public/RegisterPage'
+import { RegisterWithInvitationPage } from '../pages/public/RegisterWithInvitationPage'
+import { ResetPasswordPage } from '../pages/public/ResetPasswordPage'
+import { SignInPage } from '../pages/public/SignInPage'
 
 export const routes: RouteObject[] = [
   {
     element: <Root />,
     children: [
       { path: '/signin', element: <SignInPage /> },
-      { path: '/register', element: <PublicPlaceholder name="Register" /> },
-      { path: '/forgot-password', element: <PublicPlaceholder name="Forgot password" /> },
-      { path: '/forgot-username', element: <PublicPlaceholder name="Forgot username" /> },
-      { path: '/reset-password/:token', element: <PublicPlaceholder name="Reset password" /> },
-      { path: '/register-with-invitation/:token', element: <PublicPlaceholder name="Register with invitation" /> },
+      { path: '/register', element: <RegisterPage /> },
+      { path: '/forgot-password', element: <ForgotPasswordPage /> },
+      { path: '/forgot-username', element: <ForgotUsernamePage /> },
+      { path: '/reset-password/:token', element: <ResetPasswordPage /> },
+      { path: '/register-with-invitation/:token', element: <RegisterWithInvitationPage /> },
       {
         element: <RequireAuth />,
         children: [
@@ -23,6 +28,7 @@ export const routes: RouteObject[] = [
             element: <AppLayout />,
             children: [
               { index: true, element: <Placeholder title="nav.home" /> },
+              { path: 'account/password', element: <ChangePasswordPage /> },
               { path: 'parent/*', element: <Placeholder title="nav.parent" /> },
               { path: 'registration/*', element: <Placeholder title="nav.registration" /> },
               { path: 'accounting/*', element: <Placeholder title="nav.accounting" /> },
