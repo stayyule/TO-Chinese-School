@@ -4,8 +4,10 @@ import { assertRouteCoverage } from './access/route-coverage';
 import { AppModule } from './app.module';
 import { configureApp } from './configure-app';
 import { loadEnv } from './config/env';
+import { loadDotenv } from './config/load-dotenv';
 
 async function bootstrap(): Promise<void> {
+  loadDotenv(); // dev convenience: backend/.env fills only variables the real environment lacks
   loadEnv(process.env); // fail fast, naming any missing/invalid variable, before the app is created
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   configureApp(app);
