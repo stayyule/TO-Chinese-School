@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import * as path from 'path';
 import { Client } from 'pg';
 
@@ -35,12 +35,40 @@ async function withClient<T>(fn: (c: Client) => Promise<T>): Promise<T> {
   }
 }
 
-/** Drops and recreates schema public, then applies db/baseline.sql. Test DB only. */
+const read = (rel: string): string => readFileSync(path.resolve(__dirname, rel), 'utf8');
+
+/** The app-account connection string: same server/database as the test URL, as tocs_app. */
+export function appRoleUrl(): string {
+  const u = new URL(testDatabaseUrl());
+  u.username = 'tocs_app';
+  u.password = process.env.TOCS_APP_PASSWORD ?? 'tocs_app_dev';
+  return u.toString();
+}
+
+/** (Re)applies deploy/db/grants.sql on an open superuser connection. */
+export async function runGrants(c: Client): Promise<void> {
+  await c.query(read('../../../deploy/db/grants.sql'));
+}
+
+/**
+ * Drops and recreates schema public, then builds the schema the way production does: db/baseline.sql,
+ * every migration.sql under prisma/migrations (sorted), then roles (init-roles.sql) and grants (grants.sql).
+ * Test DB only.
+ */
 export async function loadBaseline(): Promise<void> {
-  const sql = readFileSync(path.resolve(__dirname, '../../db/baseline.sql'), 'utf8');
+  const migrationsDir = path.resolve(__dirname, '../../prisma/migrations');
+  const migrations = readdirSync(migrationsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort();
   await withClient(async (c) => {
     await c.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    await c.query(sql);
+    await c.query(read('../../db/baseline.sql'));
+    for (const m of migrations) {
+      await c.query(read(`../../prisma/migrations/${m}/migration.sql`));
+    }
+    await c.query(read('../../../deploy/db/init-roles.sql'));
+    await runGrants(c);
   });
 }
 

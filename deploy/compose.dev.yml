@@ -4,11 +4,15 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: tocs
+      POSTGRES_DB: tocs_dev
+      # init-roles.sql reads these (custom settings via libpq); dev defaults apply when unset.
+      PGOPTIONS: "-c tocs.migrator_password=${TOCS_MIGRATOR_PASSWORD:-tocs_migrator_dev} -c tocs.app_password=${TOCS_APP_PASSWORD:-tocs_app_dev}"
     ports:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Runs once, on first start of an empty data volume.
+      - ./db/init-roles.sql:/docker-entrypoint-initdb.d/10-init-roles.sql:ro
   mailpit:
     image: axllent/mailpit
     ports:

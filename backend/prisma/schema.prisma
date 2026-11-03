@@ -4,7 +4,10 @@ generator client {
 
 datasource db {
   provider     = "postgresql"
+  // Runtime client connects as the app account (DATABASE_URL); the Prisma CLI (migrate deploy)
+  // uses directUrl = the migrator account (DATABASE_MIGRATOR_URL).
   url          = env("DATABASE_URL")
+  directUrl    = env("DATABASE_MIGRATOR_URL")
   // The legacy database has no foreign keys and may hold orphaned rows; relations are
   // emulated by Prisma Client and no FK constraints are ever created (additive-only policy).
   relationMode = "prisma"
@@ -484,15 +487,16 @@ model TimedToken {
 }
 
 model User {
-  id           Int        @id @default(autoincrement())
-  username     String?    @db.VarChar(255)
-  passwordHash String?    @map("password_hash") @db.VarChar(255)
-  passwordSalt String?    @map("password_salt") @db.VarChar(255)
-  personId     Int?       @map("person_id")
-  createdAt    DateTime?  @map("created_at") @db.Timestamp(6)
-  updatedAt    DateTime?  @map("updated_at") @db.Timestamp(6)
-  rolesUsers   RoleUser[] @relation("RoleUserUserId")
-  person       Person?    @relation("UserPersonId", fields: [personId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id             Int        @id @default(autoincrement())
+  username       String?    @db.VarChar(255)
+  passwordHash   String?    @map("password_hash") @db.VarChar(255)
+  passwordSalt   String?    @map("password_salt") @db.VarChar(255)
+  passwordHashV2 String?    @map("password_hash_v2")
+  personId       Int?       @map("person_id")
+  createdAt      DateTime?  @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime?  @map("updated_at") @db.Timestamp(6)
+  rolesUsers     RoleUser[] @relation("RoleUserUserId")
+  person         Person?    @relation("UserPersonId", fields: [personId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@map("users")
 }
@@ -555,4 +559,59 @@ model WithdrawalRecord {
   electiveClass    SchoolClass? @relation("WithdrawalRecordElectiveClassId", fields: [electiveClassId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@map("withdrawal_records")
+}
+
+model Session {
+  id         BigInt   @id @default(autoincrement())
+  tokenHash  String   @unique @map("token_hash")
+  userId     Int      @map("user_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  ip         String?
+  userAgent  String?  @map("user_agent")
+
+  @@map("sessions")
+}
+
+model AuthToken {
+  id        BigInt    @id @default(autoincrement())
+  tokenHash String    @unique @map("token_hash")
+  purpose   String
+  personId  Int       @map("person_id")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("auth_tokens")
+}
+
+model Permission {
+  id          Int     @id @default(autoincrement())
+  code        String  @unique
+  description String?
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       Int @map("role_id")
+  permissionId Int @map("permission_id")
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model AuditLog {
+  id            BigInt   @id @default(autoincrement())
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  actorUserId   Int?     @map("actor_user_id")
+  actorUsername String?  @map("actor_username")
+  action        String
+  targetType    String?  @map("target_type")
+  targetId      String?  @map("target_id")
+  ip            String?
+  meta          Json     @default("{}")
+
+  @@map("audit_logs")
 }

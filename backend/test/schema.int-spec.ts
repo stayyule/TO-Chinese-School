@@ -39,9 +39,9 @@ describe('prisma schema', () => {
     await pg.end();
   });
 
-  it('maps exactly the 29 retained tables and none of the 7 unmigrated ones', () => {
+  it('maps exactly the 34 tables (29 retained + 5 new from the foundation migration) and none of the 7 unmigrated ones', () => {
     const tables = models.map((m) => m.table);
-    expect(tables).toHaveLength(29);
+    expect(tables).toHaveLength(34);
     expect(tables.every((t) => typeof t === 'string')).toBe(true);
     for (const t of UNMIGRATED) {
       expect(tables).not.toContain(t);
