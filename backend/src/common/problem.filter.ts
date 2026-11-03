@@ -11,6 +11,7 @@ const STATUS_CODES: Record<number, string> = {
   404: 'NOT_FOUND',
   409: 'CONFLICT',
   422: 'VALIDATION_ERROR',
+  429: 'RATE_LIMITED',
 };
 
 @Catch()
