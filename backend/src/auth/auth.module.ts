@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AccessModule } from '../access/access.module';
+import { MailModule } from '../mail/mail.module';
 import { PermissionGuard } from '../access/permission.guard';
 import { AuthController } from './auth.controller';
+import { AuthTokenService } from './auth-token.service';
 import { CsrfGuard } from './csrf.guard';
 import { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from './password.service';
@@ -20,16 +22,17 @@ import { SessionService } from './session.service';
  * PrismaService, AuditService and Clock come from their global modules.
  */
 @Module({
-  imports: [ThrottlerModule.forRoot([{ name: 'auth', ttl: 60_000, limit: 20 }]), AccessModule],
+  imports: [ThrottlerModule.forRoot([{ name: 'auth', ttl: 60_000, limit: 20 }]), AccessModule, MailModule],
   controllers: [AuthController],
   providers: [
     PasswordService,
+    AuthTokenService,
     SessionService,
     LoginThrottleService,
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_GUARD, useClass: PermissionGuard },
   ],
-  exports: [PasswordService, SessionService],
+  exports: [PasswordService, SessionService, AuthTokenService, MailModule],
 })
 export class AuthModule {}

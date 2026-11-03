@@ -20,3 +20,19 @@ export function loadEnv(source: Record<string, string | undefined>): Env {
   }
   return result.data;
 }
+
+const mailSchema = schema.pick({ APP_BASE_URL: true, MAIL_TRANSPORT: true }).extend({ SMTP_URL: z.string().min(1).optional() });
+
+/** Mail-only slice of the environment (does not require DB/session settings). */
+export function loadMailConfig(source: Record<string, string | undefined>): {
+  appBaseUrl: string;
+  transport: 'smtp' | 'memory';
+  smtpUrl: string | undefined;
+} {
+  const result = mailSchema.safeParse(source);
+  if (!result.success) {
+    const problems = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+    throw new Error(`Invalid mail configuration: ${problems.join('; ')}`);
+  }
+  return { appBaseUrl: result.data.APP_BASE_URL, transport: result.data.MAIL_TRANSPORT, smtpUrl: result.data.SMTP_URL };
+}
