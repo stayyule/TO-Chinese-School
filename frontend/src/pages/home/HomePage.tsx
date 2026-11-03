@@ -10,13 +10,15 @@ export function HomePage() {
   const visible = PANELS.filter((p) => can(p.permission))
   return (
     <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-      {visible.map((panel) => (
+      {visible.map((panel) => {
+        const links = panel.links.filter((l) => !l.permission || can(l.permission))
+        return (
         <Card key={panel.permission} title={<Typography.Title level={4} style={{ margin: 0 }}>{panel.title}</Typography.Title>}>
-          {panel.links.length === 0 ? (
+          {links.length === 0 ? (
             <Typography.Text type="secondary">{t('home.noLinks')}</Typography.Text>
           ) : (
             <Space wrap>
-              {panel.links.map((l) => (
+              {links.map((l) => (
                 <Link key={l.to + l.label} to={l.to}>
                   {l.label}
                 </Link>
@@ -24,7 +26,8 @@ export function HomePage() {
             </Space>
           )}
         </Card>
-      ))}
+        )
+      })}
     </Space>
   )
 }

@@ -28,11 +28,8 @@ function PersonForm({ person, isChild }: { person: PersonView; isChild: boolean 
   )
 }
 
-/** Edits the user's own record, the other parent, or a child, looked up among the user's own families. */
-export function EditPersonPage() {
-  const personId = useIdParam('personId')
+function Resolve({ personId }: { personId: number }) {
   const { data, isPending, isError, refetch } = useFamilies()
-  if (personId === null) return <NotFound />
   if (isPending) return <Spin />
   if (isError) {
     return <Result status="error" title={t('family.loadFailed')} extra={<Button onClick={() => void refetch()}>{t('family.retry')}</Button>} />
@@ -44,4 +41,11 @@ export function EditPersonPage() {
     if (parent) return <PersonForm person={parent} isChild={false} />
   }
   return <NotFound />
+}
+
+/** Edits the user's own record, the other parent, or a child; a non-numeric id renders NotFound before any request. */
+export function EditPersonPage() {
+  const personId = useIdParam('personId')
+  if (personId === null) return <NotFound />
+  return <Resolve personId={personId} />
 }

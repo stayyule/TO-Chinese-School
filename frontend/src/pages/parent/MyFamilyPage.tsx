@@ -1,17 +1,19 @@
 import { Alert, Button, Card, Descriptions, Result, Space, Spin, Typography } from 'antd'
 import { Link, useLocation } from 'react-router-dom'
+import { useMe } from '../../auth/useMe'
 import { t } from '../../i18n'
 import { addChildPath, addParentPath, editPersonPath, familyAddressPath } from '../../routes/paths'
 import { personName, useFamilies, type AddressView, type FamilyView, type PersonView } from './families'
 
 function PersonLine({ person }: { person: PersonView }) {
+  const { can } = useMe()
   const birth = person.birthYear && person.birthMonth ? `${person.birthMonth}/${person.birthYear}` : null
   return (
     <Space wrap>
       <Typography.Text strong>{personName(person)}</Typography.Text>
       {person.chineseName && <Typography.Text lang="zh">{person.chineseName}</Typography.Text>}
       {birth && <Typography.Text type="secondary">{`${t('family.birth')} ${birth}`}</Typography.Text>}
-      <Link to={editPersonPath(person.id)}>{t('family.editPerson')}</Link>
+      {can('person.self.edit') && <Link to={editPersonPath(person.id)}>{t('family.editPerson')}</Link>}
     </Space>
   )
 }
@@ -32,23 +34,24 @@ function AddressBlock({ address }: { address: AddressView | null }) {
 }
 
 function FamilyCard({ family }: { family: FamilyView }) {
+  const { can } = useMe()
   return (
     <Card style={{ marginBottom: 16 }}>
       <Typography.Title level={4}>{t('family.parentOne')}</Typography.Title>
       {family.parentOne && <PersonLine person={family.parentOne} />}
       <Typography.Title level={4}>{t('family.parentTwo')}</Typography.Title>
-      {family.parentTwo ? <PersonLine person={family.parentTwo} /> : <Link to={addParentPath(family.id)}>{t('family.addParent')}</Link>}
+      {family.parentTwo ? <PersonLine person={family.parentTwo} /> : can('family.self.parent.add') && <Link to={addParentPath(family.id)}>{t('family.addParent')}</Link>}
       <Typography.Title level={4}>{t('family.children')}</Typography.Title>
       {family.children.length === 0 && <Typography.Paragraph type="secondary">{t('family.noChildren')}</Typography.Paragraph>}
       <Space orientation="vertical" style={{ display: 'flex' }}>
         {family.children.map((c) => (
           <PersonLine key={c.id} person={c} />
         ))}
-        <Link to={addChildPath(family.id)}>{t('family.addChild')}</Link>
+        {can('family.self.child.add') && <Link to={addChildPath(family.id)}>{t('family.addChild')}</Link>}
       </Space>
       <Typography.Title level={4}>{t('family.address')}</Typography.Title>
       <AddressBlock address={family.address} />
-      <Link to={familyAddressPath(family.id)}>{t('family.editAddress')}</Link>
+      {can('family.self.address.edit') && <Link to={familyAddressPath(family.id)}>{t('family.editAddress')}</Link>}
     </Card>
   )
 }

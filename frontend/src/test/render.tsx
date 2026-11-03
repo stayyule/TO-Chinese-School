@@ -19,7 +19,7 @@ export function meWith(permissions: string[], roles: string[] = []) {
   }
 }
 
-export function useMeHandler(permissions: string[], roles: string[] = []) {
+export function mockMe(permissions: string[], roles: string[] = []) {
   server.use(http.get('/api/v1/me', () => HttpResponse.json(meWith(permissions, roles))))
 }
 

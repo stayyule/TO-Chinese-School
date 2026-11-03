@@ -5,7 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '../../api/client'
 import { t, type MessageKey } from '../../i18n'
 import { PATHS } from '../../routes/paths'
-import { applyDetails } from '../public/shared'
+import { placeError } from '../public/shared'
 import { FAMILIES_KEY, type AddressView, type PersonView } from './families'
 
 /** A numeric route param (digits only), or null. Pages render NotFound for null before any API call. */
@@ -36,7 +36,7 @@ export function useSubmit<V>(form: FormInstance<V>, run: (values: V) => Promise<
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) setNotFound(true)
       else if (e instanceof ApiError && errorKeys[e.code]) setError(t(errorKeys[e.code] as MessageKey))
-      else if (!(e instanceof ApiError && applyDetails(form, e))) setError(t('common.genericError'))
+      else setError(placeError(form, e, {}))
     } finally {
       setBusy(false)
     }
@@ -117,8 +117,7 @@ export function addressBody(v: AddressValues) {
   }
 }
 
-
 /** Latest plausible birth year (the API requires a year before the current one). */
 export const MAX_BIRTH_YEAR = new Date().getFullYear() - 1
 
-export const digitCount = (s: string) => s.replace(/\D/g, "").length
+export const digitCount = (s: string) => s.replace(/\D/g, '').length

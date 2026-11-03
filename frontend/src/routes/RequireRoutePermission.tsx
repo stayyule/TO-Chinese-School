@@ -4,11 +4,13 @@ import { useMe } from '../auth/useMe'
 import { Forbidden } from '../pages/Forbidden'
 
 /**
- * Route wrapper: renders the page only when the signed-in user holds `code`, otherwise the Forbidden page.
- * Use as an element around a page (children) or as a layout route (Outlet). UI hint only; the API enforces access.
+ * Route wrapper: renders the page only when the signed-in user holds  (or any of ), otherwise the
+ * Forbidden page. Use as an element around a page (children) or as a layout route (Outlet). UI hint only; the API
+ * enforces access.
  */
-export function RequireRoutePermission({ code, children }: { code: string; children?: ReactNode }) {
+export function RequireRoutePermission({ code, anyOf, children }: { code?: string; anyOf?: string[]; children?: ReactNode }) {
   const { can } = useMe()
-  if (!can(code)) return <Forbidden />
+  const allowed = [...(code ? [code] : []), ...(anyOf ?? [])].some(can)
+  if (!allowed) return <Forbidden />
   return <>{children ?? <Outlet />}</>
 }

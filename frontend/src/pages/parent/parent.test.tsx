@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { server } from '../../test/server'
-import { csrf, problem, renderApp, useMeHandler } from '../../test/render'
+import { csrf, problem, renderApp, mockMe } from '../../test/render'
 
 const PERMS = [
   'home.panel.student_parent',
@@ -22,7 +22,7 @@ const families = () => http.get('/api/v1/me/families', () => HttpResponse.json([
 
 describe('my family page', () => {
   it('lists parents, children and address; Chinese names render unchanged', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     server.use(families())
     renderApp('/parent/family')
     expect(await screen.findByText('陈小明')).toBeInTheDocument()
@@ -33,8 +33,19 @@ describe('my family page', () => {
     expect(screen.getByRole('link', { name: 'Edit address' })).toHaveAttribute('href', '/parent/families/5/address')
   })
 
+  it('hides action links the user lacks the permission for', async () => {
+    mockMe(['home.panel.student_parent'])
+    server.use(families())
+    renderApp('/parent/family')
+    expect(await screen.findByText('陈小明')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Add child' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Add second parent' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit address' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument()
+  })
+
   it('shows an error state with retry when loading fails', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     server.use(http.get('/api/v1/me/families', () => problem(500, 'INTERNAL')))
     renderApp('/parent/family')
     expect(await screen.findByText('Could not load your family. Please try again.')).toBeInTheDocument()
@@ -44,7 +55,7 @@ describe('my family page', () => {
 
 describe('add child', () => {
   it('without birth month shows the field error and does not call the API', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     let posts = 0
     server.use(
       families(),
@@ -66,7 +77,7 @@ describe('add child', () => {
   })
 
   it('sends numbers and Chinese as typed, then returns to the family page with a notice', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     let body: unknown
     server.use(
       families(),
@@ -91,7 +102,7 @@ describe('add child', () => {
   })
 
   it('maps server 422 details onto fields', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     server.use(
       families(),
       csrf,
@@ -111,7 +122,7 @@ describe('add child', () => {
 
 describe('not found handling', () => {
   it('shows Not found when the API answers 404 for the family', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     server.use(
       families(),
       csrf,
@@ -124,13 +135,24 @@ describe('not found handling', () => {
   })
 
   it('shows Not found without any request for a non-numeric id', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
+    let calls = 0
+    server.use(
+      http.get('/api/v1/me/families', () => {
+        calls += 1
+        return HttpResponse.json([family])
+      }),
+    )
     renderApp('/parent/families/abc/address')
     expect(await screen.findByText(/not found/i)).toBeInTheDocument()
+    renderApp('/parent/people/abc/edit')
+    expect((await screen.findAllByText(/not found/i)).length).toBeGreaterThan(0)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(calls).toBe(0)
   })
 
   it('shows Not found for a family that is not in the user list', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     server.use(families())
     renderApp('/parent/families/99/children/new')
     expect(await screen.findByText(/not found/i)).toBeInTheDocument()
@@ -139,7 +161,7 @@ describe('not found handling', () => {
 
 describe('add parent and edit person', () => {
   it('reports PARENT_TWO_EXISTS', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     server.use(
       families(),
       csrf,
@@ -155,7 +177,7 @@ describe('add parent and edit person', () => {
   })
 
   it('prefills the person and PATCHes the edit', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     let body: unknown
     server.use(
       families(),
@@ -176,7 +198,7 @@ describe('add parent and edit person', () => {
   })
 
   it('edits the address with a zipcode maximum of 5 digits and prefilled phone', async () => {
-    useMeHandler(PERMS)
+    mockMe(PERMS)
     server.use(families())
     renderApp('/parent/families/5/address')
     expect(await screen.findByDisplayValue('(805) 555-1234')).toBeInTheDocument()
