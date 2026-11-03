@@ -1,0 +1,34 @@
+# Deterministic line endings for the rewrite (Prisma checksums migrations by bytes).
+# The legacy trees (chineseschool/, chineseschool-rails2.3.12/, data-export/) are
+# intentionally NOT covered by the text=auto rules so their history is left untouched.
+
+/.gitattributes text eol=lf
+/.gitignore text eol=lf
+/.gitmodules text eol=lf
+/.nvmrc text eol=lf
+
+backend/** text=auto eol=lf
+frontend/** text=auto eol=lf
+deploy/** text=auto eol=lf
+scripts/** text=auto eol=lf
+.github/** text=auto eol=lf
+docs/** text=auto eol=lf
+
+*.sql text eol=lf
+*.sh text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
