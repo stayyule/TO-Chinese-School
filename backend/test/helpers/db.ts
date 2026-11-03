@@ -10,7 +10,11 @@ export function testDatabaseUrl(): string {
 
 /** Destructive helpers must never touch anything but a database named *_test. */
 export function assertTestDatabase(url: string): void {
-  const name = new URL(url).pathname.replace(/^\//, '');
+  const u = new URL(url);
+  if (u.searchParams.has('database') || u.searchParams.has('dbname')) {
+    throw new Error('Refusing test-DB operation: URL must not override the database via query parameters');
+  }
+  const name = u.pathname.replace(/^\//, '');
   if (!name.endsWith('_test')) {
     throw new Error(`Refusing destructive test-DB operation on database "${name}" (name must end with _test)`);
   }
@@ -22,6 +26,9 @@ async function withClient<T>(fn: (c: Client) => Promise<T>): Promise<T> {
   const client = new Client({ connectionString: url });
   await client.connect();
   try {
+    if (!client.database?.endsWith('_test')) {
+      throw new Error(`Refusing destructive test-DB operation: connected database "${client.database}" does not end with _test`);
+    }
     return await fn(client);
   } finally {
     await client.end();
