@@ -1,23 +1,11 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, PipeTransform, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Post, Req } from '@nestjs/common';
 import type { AuthedRequest } from '../auth/session.guard';
 import { AuditService } from '../audit/audit.service';
 import { AppError } from '../common/errors';
+import { IdParam as id } from '../common/id.pipe';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddRoleUserDto } from './dto/add-role-user.dto';
 import { RequirePermission } from './permission.decorators';
-
-const INT4_MAX = 2_147_483_647;
-
-/** Positive int4 path id; anything else is a 422 VALIDATION_ERROR (and never reaches the database). */
-class IdPipe implements PipeTransform<string, number> {
-  transform(value: string): number {
-    if (!/^[0-9]+$/.test(value)) throw new AppError(422, 'VALIDATION_ERROR', 'Validation failed', ['id must be a positive integer']);
-    const n = Number(value);
-    if (n < 1 || n > INT4_MAX) throw new AppError(422, 'VALIDATION_ERROR', 'Validation failed', ['id must be a positive integer']);
-    return n;
-  }
-}
-const id = (name: string) => Param(name, new IdPipe());
 
 const englishName = (p: { englishFirstName: string | null; englishLastName: string | null } | null): string | null => {
   if (!p) return null;

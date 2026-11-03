@@ -145,6 +145,34 @@ export class FamiliesService {
     return n > 0;
   }
 
+  /** Ids of the families in which `personId` is parent one or two, ascending. */
+  async familyIdsAsParent(personId: number): Promise<number[]> {
+    const rows = await this.prisma.family.findMany({
+      where: { OR: [{ parentOneId: personId }, { parentTwoId: personId }] },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * The address of the person's first family (old Person#families: families as parent, then as child, each by
+   * id), or null when there is no family or that family has no address.
+   */
+  async firstFamilyAddress(personId: number): Promise<AddressInput | null> {
+    const select = { address: { select: ADDRESS_SELECT } } as const;
+    const family =
+      (await this.prisma.family.findFirst({
+        where: { OR: [{ parentOneId: personId }, { parentTwoId: personId }] },
+        select,
+        orderBy: { id: 'asc' },
+      })) ??
+      (await this.prisma.family.findFirst({ where: { familiesChildren: { some: { childId: personId } } }, select, orderBy: { id: 'asc' } }));
+    if (!family?.address) return null;
+    const { street, city, state, zipcode, homePhone, cellPhone, email } = family.address;
+    return { street, city, state, zipcode, homePhone, cellPhone, email };
+  }
+
   async personIsParentInFamily(personId: number, familyId: number): Promise<boolean> {
     const n = await this.prisma.family.count({
       where: { id: familyId, OR: [{ parentOneId: personId }, { parentTwoId: personId }] },
