@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AccessModule } from '../access/access.module';
+import { AccountService } from './account.service';
+import { TokenPhoneLimiter } from './token-phone-limiter';
 import { MailModule } from '../mail/mail.module';
 import { PermissionGuard } from '../access/permission.guard';
 import { PersonPhoneService } from '../people/phone';
@@ -34,6 +36,8 @@ import { SessionService } from './session.service';
     LoginThrottleService,
     PersonPhoneService,
     RegistrationService,
+    TokenPhoneLimiter,
+    AccountService,
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_GUARD, useClass: PermissionGuard },

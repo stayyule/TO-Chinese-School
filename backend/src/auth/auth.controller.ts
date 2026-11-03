@@ -3,12 +3,16 @@ import { Body, Controller, Get, HttpCode, Param, Post, Req, Res, UseGuards } fro
 import { ThrottlerGuard } from '@nestjs/throttler';
 import type { User } from '@prisma/client';
 import type { CookieOptions, Response } from 'express';
-import { Authenticated, Public } from '../access/permission.decorators';
+import { Public } from '../access/permission.decorators';
 import { AuditService } from '../audit/audit.service';
 import { AppError } from '../common/errors';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccountService } from './account.service';
 import { CSRF_COOKIE } from './csrf.guard';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ForgotUsernameDto } from './dto/forgot-username.dto';
 import { LoginDto } from './dto/login.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from './password.service';
 import { RegisterWithInvitationDto } from './dto/register-with-invitation.dto';
@@ -34,6 +38,7 @@ export class AuthController {
     private readonly throttle: LoginThrottleService,
     private readonly audit: AuditService,
     private readonly registration: RegistrationService,
+    private readonly account: AccountService,
   ) {}
 
   /** Double-submit token, readable by the SPA (not HttpOnly). An existing well-formed token is kept for other tabs. */
@@ -92,8 +97,12 @@ export class AuthController {
     return { userId: user.id };
   }
 
+  /**
+   * Public so logout is idempotent: a stale or expired session still gets 204 and a cleared cookie (CSRF still
+   * applies). Any session row named by the cookie is dropped; only a live session (req.user) is audited.
+   */
   @Post('logout')
-  @Authenticated()
+  @Public()
   @HttpCode(204)
   async logout(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response): Promise<void> {
     const raw: unknown = req.cookies?.[SESSION_COOKIE];
@@ -117,5 +126,38 @@ export class AuthController {
   @HttpCode(201)
   register(@Body() dto: RegisterWithInvitationDto, @Req() req: AuthedRequest): Promise<{ userId: number }> {
     return this.registration.register(dto, req.ip);
+  }
+
+  /** D1: always 202 {}; the lookup and the mail happen after the response (see AccountService). */
+  @Post('forgot-password')
+  @Public()
+  @HttpCode(202)
+  forgotPassword(@Body() dto: ForgotPasswordDto): Record<string, never> {
+    this.account.requestPasswordReset(dto.username);
+    return {};
+  }
+
+  /** 200 {} while the reset link is usable; 404 INVALID_TOKEN otherwise. */
+  @Get('reset-tokens/:token')
+  @Public()
+  async resetToken(@Param('token') token: string): Promise<Record<string, never>> {
+    await this.account.checkResetToken(token);
+    return {};
+  }
+
+  @Post('reset-password')
+  @Public()
+  @HttpCode(204)
+  async resetPassword(@Body() dto: ResetPasswordDto, @Req() req: AuthedRequest): Promise<void> {
+    await this.account.resetPassword(dto, req.ip);
+  }
+
+  /** D1: always 202 {}; usernames only ever travel by mail to the address on record. */
+  @Post('forgot-username')
+  @Public()
+  @HttpCode(202)
+  forgotUsername(@Body() dto: ForgotUsernameDto): Record<string, never> {
+    this.account.requestUsernameReminder(dto.email);
+    return {};
   }
 }

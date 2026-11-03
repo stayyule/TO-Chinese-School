@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { Clock } from '../common/clock';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -57,7 +58,8 @@ export class SessionService {
     await this.prisma.session.deleteMany({ where: { tokenHash: hashId(rawId) } });
   }
 
-  async destroyAllForUser(userId: number): Promise<void> {
-    await this.prisma.session.deleteMany({ where: { userId } });
+  /** Pass a transaction client to make this part of a larger write. */
+  async destroyAllForUser(userId: number, db: Prisma.TransactionClient = this.prisma): Promise<void> {
+    await db.session.deleteMany({ where: { userId } });
   }
 }

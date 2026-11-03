@@ -312,6 +312,27 @@ describe('auth: login, sessions, CSRF, throttling (app connected as tocs_app)', 
     expect(audit[0]).toMatchObject({ actorUserId: aliceId, actorUsername: 'alice', ip });
   });
 
+  it('logout is idempotent: a stale (idle-expired) session cookie with a valid CSRF token still gets 204 and a cleared cookie', async () => {
+    const ip = newIp();
+    const sid = await loginOk('alice', 'Pa55word!x', ip);
+    clock.advanceMs(8 * HOUR + 1);
+
+    const { token, cookie } = await csrfFor(ip);
+    const out = await http()
+      .post('/api/v1/auth/logout')
+      .set('X-Forwarded-For', ip)
+      .set('Cookie', [cookie, `tocs_session=${sid}`])
+      .set('X-CSRF-Token', token);
+    expect(out.status).toBe(204);
+    expect(setCookieLine(out, 'tocs_session')).toMatch(/^tocs_session=;.*Expires=Thu, 01 Jan 1970/);
+    expect(await admin.session.count()).toBe(0);
+    expect(await admin.auditLog.count({ where: { action: 'auth.logout' } })).toBe(0);
+
+    // No session cookie at all: still 204.
+    const bare = await http().post('/api/v1/auth/logout').set('X-Forwarded-For', ip).set('Cookie', cookie).set('X-CSRF-Token', token);
+    expect(bare.status).toBe(204);
+  });
+
   it('issues a fresh session id on every login and drops the session presented at login (fixation)', async () => {
     const ip = newIp();
     const first = await loginOk('alice', 'Pa55word!x', ip);
