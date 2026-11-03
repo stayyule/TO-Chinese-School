@@ -7,3 +7,6 @@ chineseschool/.idea/
 .idea/
 .DS_Store
 
+
+# Local-only diagram
+docs/requirements/requirements-overview.excalidraw
