@@ -83,6 +83,10 @@ Priority: **M** = Must, **S** = Should, **C** = Could. Acceptance criteria are w
 | FR-AUTH-03 | Administrator invites a person by e-mail to create an account (invitation link carries an expiring token) | M | Expired or used tokens are rejected |
 | FR-AUTH-04 | Forgot password: e-mail a reset link with an expiring token; signed-in users can change their password | M | Token is single-use and time-limited |
 | FR-AUTH-08 | Public pages: contact us, privacy statement, consent sample | S | Accessible without signing in |
+| FR-AUTH-09 | Self-registration for new parents: enter address, parent one, username and password; creates address, person, family and account (Student Parent role) at once; rejected if the address email already exists | M | All-or-nothing; an already-registered email returns a conflict without revealing existing usernames; concurrent registrations of the same username yield exactly one success (added 2026-11-02, old `signin#register`) |
+| FR-AUTH-10 | Forgot username: send the usernames to the email address | S | Same response whether or not the email exists; the page never shows usernames (added 2026-11-02, old `signin#forgot_username`; the old page displayed usernames, the new flow emails them) |
+
+> Addendum to FR-AUTH-03/04: invitation sign-up and password reset must verify a phone number on submit (matching the home/cell number on the person's or their family's address, digits only) as an identity check; forgot-password responds identically for unknown usernames and users without an email address. Source: `signin_controller`, `person.rb#phone_number_correct?`.
 
 Source: `signin_controller`, `signout_controller`, `timed_token.rb`, `signin_mailer`, `pages_controller`, `home/change_password`
 

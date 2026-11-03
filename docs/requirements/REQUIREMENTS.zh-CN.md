@@ -83,6 +83,10 @@
 | FR-AUTH-03 | 管理员通过邮件邀请人员注册账号（邀请链接含有时效令牌） | M | 过期/已使用的令牌被拒绝 |
 | FR-AUTH-04 | 忘记密码：发送带时效令牌的重置邮件；已登录用户可修改密码 | M | 令牌单次有效、限时 |
 | FR-AUTH-08 | 公共页面：联系我们、隐私声明、同意书样例 | S | 无需登录可访问 |
+| FR-AUTH-09 | 新家长自助注册：填写地址、家长一信息、用户名和密码，一次创建地址、人员、家庭、账号（Student Parent 角色）；地址邮箱已存在则拒绝 | M | 全部成功或全部不创建；邮箱已被登记时返回冲突且不显示已有用户名；同一用户名并发注册只成功一个（2026-11-02 补充，旧代码 `signin#register`） |
+| FR-AUTH-10 | 找回用户名：按邮箱把用户名发送到该邮箱 | S | 无论邮箱是否存在响应相同，页面不显示用户名（2026-11-02 补充，旧代码 `signin#forgot_username`；旧版直接在页面显示用户名，新版改为邮件发送） |
+
+> FR-AUTH-03/04 补充：邀请注册与重置密码在提交时须核对手机号（与人员或其家庭地址上的住宅/手机号一致，仅比较数字），作为身份校验；忘记密码对不存在的用户名/无邮箱的用户响应相同。来源：`signin_controller`、`person.rb#phone_number_correct?`。
 
 来源：`signin_controller`、`signout_controller`、`timed_token.rb`、`signin_mailer`、`pages_controller`、`home/change_password`
 
