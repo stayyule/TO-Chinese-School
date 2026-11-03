@@ -4,7 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { Clock } from '../common/clock';
 import { AppError } from '../common/errors';
 import { PacificDate, pacificDate, toDbDate } from '../common/pacific-date';
-import { validationProblem } from '../people/validation';
+import { validationProblem, type ValidationErrors } from '../people/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { toRow } from './school-year.lookup';
 import {
@@ -52,6 +52,43 @@ function columns(input: SchoolYearInput): Prisma.SchoolYearUncheckedUpdateInput 
   for (const f of DATE_FIELDS) data[f] = input[f] ? toDbDate(pacificDate(input[f])) : null;
   for (const f of FEE_KEYS) data[FEE_FIELDS[f]] = input[f];
   return data as Prisma.SchoolYearUncheckedUpdateInput;
+}
+
+export interface BookChargeView {
+  id: number;
+  gradeId: number;
+  gradeName: string;
+  bookChargeInCents: number;
+}
+
+const INT4_MAX = 2_147_483_647;
+
+/** Shape-check a PUT book-charges body; field-keyed 422 details like `items.0.bookChargeInCents`. */
+function parseBookChargeBody(body: unknown): { id: number; bookChargeInCents: number }[] {
+  if (!Array.isArray(body) || body.length === 0) {
+    throw validationProblem({ body: 'REQUIRED' }) as AppError;
+  }
+  const errors: ValidationErrors = {};
+  const seen = new Set<number>();
+  const items: { id: number; bookChargeInCents: number }[] = [];
+  body.forEach((raw: unknown, i) => {
+    const o = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
+    if (o === null || Object.keys(o).some((k) => k !== 'id' && k !== 'bookChargeInCents')) {
+      errors[`items.${i}`] = 'INVALID';
+      return;
+    }
+    const { id, bookChargeInCents: value } = o;
+    if (typeof id !== 'number' || !Number.isInteger(id) || id < 1 || id > INT4_MAX) errors[`items.${i}.id`] = 'INVALID';
+    else if (seen.has(id)) errors[`items.${i}.id`] = 'INVALID';
+    else seen.add(id);
+    if (value === undefined || value === null) errors[`items.${i}.bookChargeInCents`] = 'REQUIRED';
+    else if (typeof value !== 'number' || !Number.isInteger(value)) errors[`items.${i}.bookChargeInCents`] = 'INVALID';
+    else if (value < 0 || value > INT4_MAX) errors[`items.${i}.bookChargeInCents`] = 'OUT_OF_RANGE';
+    if (typeof id === 'number' && typeof value === 'number') items.push({ id, bookChargeInCents: value });
+  });
+  const problem = validationProblem(errors);
+  if (problem) throw problem;
+  return items;
 }
 
 @Injectable()
@@ -130,6 +167,44 @@ export class SchoolYearService {
       const updated = await tx.schoolYear.update({ where: { id }, data: { ...columns(mergedInput), updatedAt: now } });
       await this.audit.record({ action: 'school_year.updated', actorUserId, targetType: 'school_year', targetId: id, meta: { id, changed } }, tx);
       return toView(updated);
+    });
+  }
+
+  /** A year's book charges ordered by grade_id (old BookCharge.find_all_for). */
+  async listBookCharges(schoolYearId: number, db: Prisma.TransactionClient = this.prisma): Promise<BookChargeView[]> {
+    if (!(await db.schoolYear.findUnique({ where: { id: schoolYearId }, select: { id: true } }))) throw notFound();
+    const rows = await db.bookCharge.findMany({ where: { schoolYearId }, include: { grade: true }, orderBy: [{ gradeId: 'asc' }, { id: 'asc' }] });
+    return rows.map((r) => ({
+      id: r.id,
+      gradeId: r.gradeId,
+      gradeName: `${r.grade.chineseName ?? ''}${r.grade.englishName ? `(${r.grade.englishName})` : ''}`,
+      bookChargeInCents: r.bookChargeInCents,
+    }));
+  }
+
+  /**
+   * All-or-nothing: the body must be a non-empty array of {id, bookChargeInCents} (integer cents, 0..int4 max,
+   * no duplicate ids, no other fields) and every id must be a charge of THIS year (INVALID_BOOK_CHARGE, 422),
+   * otherwise nothing is written. Only rows whose value differs are updated.
+   */
+  async updateBookCharges(schoolYearId: number, body: unknown, actorUserId?: number): Promise<BookChargeView[]> {
+    const items = parseBookChargeBody(body);
+    const now = this.clock.now();
+    return this.prisma.$transaction(async (tx) => {
+      const current = await this.listBookCharges(schoolYearId, tx);
+      const byId = new Map(current.map((c) => [c.id, c]));
+      if (items.some((i) => !byId.has(i.id))) {
+        throw new AppError(422, 'INVALID_BOOK_CHARGE', 'Every book charge must belong to this school year');
+      }
+      const changes = items.filter((i) => byId.get(i.id)?.bookChargeInCents !== i.bookChargeInCents);
+      for (const c of changes) {
+        await tx.bookCharge.update({ where: { id: c.id }, data: { bookChargeInCents: c.bookChargeInCents, updatedAt: now } });
+      }
+      await this.audit.record(
+        { action: 'school_year.book_charges_updated', actorUserId, targetType: 'school_year', targetId: schoolYearId, meta: { schoolYearId, changed: changes.length } },
+        tx,
+      );
+      return this.listBookCharges(schoolYearId, tx);
     });
   }
 

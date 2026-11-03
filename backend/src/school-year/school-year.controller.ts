@@ -1,9 +1,9 @@
-import { Body, Controller, Get, HttpCode, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Put, Req } from '@nestjs/common';
 import { RequirePermission } from '../access/permission.decorators';
 import type { AuthedRequest } from '../auth/session.guard';
 import { IdParam } from '../common/id.pipe';
 import { SchoolYearInputDto } from './dto/school-year-input.dto';
-import { SchoolYearService, type SchoolYearView } from './school-year.service';
+import { SchoolYearService, type BookChargeView, type SchoolYearView } from './school-year.service';
 
 /** Registration-officer school-year administration (old Admin::SchoolYearsController). */
 @Controller('school-years')
@@ -32,6 +32,19 @@ export class SchoolYearController {
   @RequirePermission('school_years.edit')
   update(@IdParam('id') id: number, @Body() dto: SchoolYearInputDto, @Req() req: AuthedRequest): Promise<SchoolYearView> {
     return this.years.update(id, dto, req.user?.id);
+  }
+
+  @Get(':id/book-charges')
+  @RequirePermission('school_years.read')
+  bookCharges(@IdParam('id') id: number): Promise<BookChargeView[]> {
+    return this.years.listBookCharges(id);
+  }
+
+  /** Body is a bare JSON array `[{id, bookChargeInCents}]`, validated by the service (the global pipe cannot check array bodies). */
+  @Put(':id/book-charges')
+  @RequirePermission('school_years.book_charges.edit')
+  updateBookCharges(@IdParam('id') id: number, @Body() body: unknown, @Req() req: AuthedRequest): Promise<BookChargeView[]> {
+    return this.years.updateBookCharges(id, body, req.user?.id);
   }
 
   @Post(':id/auto-class-assignment/toggle')
