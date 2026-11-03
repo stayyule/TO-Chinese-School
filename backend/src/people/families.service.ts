@@ -155,6 +155,16 @@ export class FamiliesService {
     return rows.map((r) => r.id);
   }
 
+  /** Ids of the families in which `personId` is a parent or a child, ascending. */
+  async familyIdsOfPerson(personId: number): Promise<number[]> {
+    const rows = await this.prisma.family.findMany({
+      where: { OR: [{ parentOneId: personId }, { parentTwoId: personId }, { familiesChildren: { some: { childId: personId } } }] },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    return rows.map((r) => r.id);
+  }
+
   /**
    * The prefill address for `personId`'s personal-address form, as seen by `requesterPersonId`, or null when there
    * is no such family or it has no address. Own record: the first family as parent, then as child, each by id
