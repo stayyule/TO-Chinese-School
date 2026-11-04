@@ -1,0 +1,8 @@
+---
+profile: production
+offline: true
+skip_list:
+  # The role variables (deploy_user, admin_user, session_secret, ufw_allowed_tcp_ports, ...) are the operator-facing
+  # interface documented in README.md and shared across roles (deploy_user is used by hardening, docker and app), so
+  # they are not prefixed with a role name.
+  - var-naming[no-role-prefix]

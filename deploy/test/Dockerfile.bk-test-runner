@@ -1,0 +1,12 @@
+# Test runner for deploy/test/backup-roundtrip.sh: the same client tools the production host uses for backups and
+# deploys (postgres 16 client tools matching compose.prod.yml's server, age, rclone, curl, flock, docker CLI + compose
+# plugin). Built without a context: docker build -t tocs-bk-test/runner:local - < Dockerfile.bk-test-runner
+# Test-only image; nothing here is deployed.
+FROM docker:27.5.1-cli AS dockercli
+
+FROM postgres:16.15-bookworm
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends age rclone curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose

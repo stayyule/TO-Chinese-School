@@ -1,0 +1,4 @@
+# {{ ansible_managed }} (deploy/ansible, role hardening)
+{% for key, value in hardening_sysctl | dictsort %}
+{{ key }} = {{ value }}
+{% endfor %}

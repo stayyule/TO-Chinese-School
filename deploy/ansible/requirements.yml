@@ -1,0 +1,6 @@
+---
+# Collections used by site.yml (community.general.ufw). Same pin as deploy/test/Dockerfile.ansible-controller.
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: community.general
+    version: "12.6.6"

@@ -1,0 +1,26 @@
+# Overlay for deploy/test/stack.test.sh ONLY: builds the images locally under throwaway tags and seeds the
+# throwaway database with the legacy baseline (standing in for the restored production dump), so `migrate` runs
+# the real production sequence. Paths are relative to deploy/ (the project directory of compose.prod.yml).
+services:
+  caddy:
+    image: tocs-stack-test/tocs-web:test
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+  api:
+    image: tocs-stack-test/tocs-api:test
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+      target: runtime
+  migrate:
+    image: tocs-stack-test/tocs-api:test-migrate
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+      target: migrate
+  postgres:
+    volumes:
+      # Runs after 10-init-roles.sql: baseline tables, then init-roles again to hand their ownership to tocs_migrator.
+      - ../backend/db/baseline.sql:/docker-entrypoint-initdb.d/20-baseline.sql:ro
+      - ./db/init-roles.sql:/docker-entrypoint-initdb.d/30-init-roles.sql:ro

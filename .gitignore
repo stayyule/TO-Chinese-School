@@ -8,5 +8,21 @@ chineseschool/.idea/
 .DS_Store
 
 
+# New stack
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+!deploy/.env.prod.example
+coverage/
+*.tsbuildinfo
+openapi.json
+
+# Ansible operator files (inventory and vault-encrypted secrets stay outside git)
+deploy/ansible/inventory.ini
+deploy/ansible/secrets*.yml
+deploy/ansible/*.vault.yml
+
 # Local-only diagram
 docs/requirements/requirements-overview.excalidraw

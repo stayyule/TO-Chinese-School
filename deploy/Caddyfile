@@ -1,0 +1,97 @@
+# TOCS edge: TLS, security headers, static SPA, reverse proxy to the API (baked into ghcr.io/<owner>/tocs-web).
+# Environment (substituted when Caddy starts):
+#   SITE_ADDRESS  public host name (production: register.to-cs.org; local stack test: localhost)
+#   CADDY_TLS     argument of the `tls` directive: the ACME account e-mail (Let's Encrypt, production) or
+#                 `internal` (Caddy's local CA, tests only)
+# Caddy runs unprivileged on 8080/8443; compose publishes them as 80/443. Access logs are deliberately off (request
+# URIs can carry one-time tokens); the API keeps its own audit log.
+{
+	admin off
+	skip_install_trust
+	http_port 8080
+	https_port 8443
+	# Our own http:// site below redirects; Caddy's automatic redirect would point at the internal port 8443.
+	auto_https disable_redirects
+	servers {
+		# HTTP/3 off: Caddy would advertise h3 on its internal port (Alt-Svc: h3=":8443"), not the public 443.
+		protocols h1 h2
+		# No trusted_proxies: Caddy is the first hop, so client-supplied X-Forwarded-* headers are never believed.
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# style-src 'unsafe-inline': antd's CSS-in-JS injects <style> elements at runtime and its components set
+		# style="" attributes; scripts stay 'self' only. The payment gateway origin is added by the payments
+		# sub-project.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+		-Via
+		-X-Powered-By
+	}
+}
+
+http://{$SITE_ADDRESS} {
+	import security_headers
+	redir https://{host}{uri} 308
+}
+
+{$SITE_ADDRESS} {
+	tls {$CADDY_TLS}
+	import security_headers
+	encode zstd gzip
+
+	# API and health check: never cached. X-Forwarded-For is SET to the TCP peer, never appended to a
+	# client-supplied value, so the API (TRUST_PROXY=1) sees the real client address (deploy/test/stack.test.sh
+	# checks it). With no trusted_proxies Caddy already does this by default and logs "Unnecessary header_up
+	# X-Forwarded-For" at startup; the explicit directive is kept so that a later trusted_proxies change cannot
+	# silently turn overwrite into append.
+	# request_body: JSON bodies are tiny (the API's own JSON parser caps them at 100 kB); anything over 1 MB is
+	# refused with 413 before it reaches the api.
+	@api path /api/* /healthz
+	handle @api {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy api:3000 {
+			header_up X-Forwarded-For {remote_host}
+			header_up -X-Real-IP
+			header_up -Forwarded
+			header_down Cache-Control "no-store"
+		}
+	}
+
+	root * /srv
+
+	# Content-hashed bundles: cache forever. A missing file is a 404 (no SPA fallback under /assets).
+	handle /assets/* {
+		@found file
+		header @found Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Everything else: real files (favicon) or the SPA shell for client-side routes; always revalidated.
+	handle {
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Errors Caddy generates itself (missing asset 404, 413, 502 when the api is down) carry the same security
+	# headers, are never cached, and expose only the status line.
+	handle_errors {
+		import security_headers
+		header Cache-Control "no-store"
+		respond "{err.status_code} {err.status_text}" {err.status_code}
+	}
+}

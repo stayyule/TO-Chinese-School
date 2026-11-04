@@ -1,0 +1,203 @@
+---
+# Validate everything BEFORE any change. Only read-only tasks here. Assertion output names the variable, never its
+# value (quiet asserts, loop labels are variable names).
+
+- name: Check the target is a supported Ubuntu LTS release
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_version'] in preflight_supported_releases
+      - ansible_facts['architecture'] in ['x86_64', 'aarch64']
+    fail_msg: >-
+      This playbook supports Ubuntu {{ preflight_supported_releases | join(', ') }} on x86_64/aarch64 only
+      (found {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+      {{ ansible_facts['architecture'] }}).
+    quiet: true
+
+- name: Check secrets have the required format (values are never printed)
+  ansible.builtin.assert:
+    that:
+      - preflight_value is string
+      - preflight_value | length >= item.min
+      - preflight_value is match(item.re)
+    fail_msg: >-
+      {{ item.name }} must be {{ item.desc }}. Set it in the vault-encrypted vars file (see README.md).
+    quiet: true
+  vars:
+    preflight_value: "{{ lookup('ansible.builtin.vars', item.name, default='') }}"
+  loop: "{{ preflight_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Check no secret is placeholder text (values are never printed)
+  ansible.builtin.assert:
+    that:
+      - not (preflight_value | lower is search(preflight_placeholder_pattern))
+    fail_msg: >-
+      {{ item.name }} looks like placeholder text (contains replace-with, changeme, placeholder, ...): generate a
+      real value (README.md).
+    quiet: true
+  vars:
+    preflight_value: "{{ lookup('ansible.builtin.vars', item.name, default='') | string }}"
+  loop: "{{ preflight_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Check the database passwords are three different values
+  ansible.builtin.assert:
+    that:
+      - postgres_password != tocs_migrator_password
+      - postgres_password != tocs_app_password
+      - tocs_migrator_password != tocs_app_password
+    fail_msg: postgres_password, tocs_migrator_password and tocs_app_password must all be different.
+    quiet: true
+
+- name: Check the age identity (private key) is not provided to this play
+  ansible.builtin.assert:
+    that:
+      - backup_age_identity is not defined
+      - "'AGE-SECRET-KEY' not in (backup_age_recipient | upper)"
+    fail_msg: >-
+      The age identity (AGE-SECRET-KEY-...) must never be installed on the production host. Provide only the PUBLIC
+      key as backup_age_recipient and keep the identity offline.
+    quiet: true
+
+- name: Check admin_user
+  ansible.builtin.assert:
+    that:
+      - admin_user is defined
+      - admin_user is string
+      - admin_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - admin_user not in ['root', deploy_user]
+    fail_msg: >-
+      admin_user must be set to the existing sudo account you log in with (lower-case Unix name), and must not be
+      root or {{ deploy_user }}: after this play sshd admits only {{ deploy_user }} and admin_user.
+    quiet: true
+
+- name: Check non-secret settings
+  ansible.builtin.assert:
+    that:
+      - deploy_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - deploy_ssh_public_keys is defined
+      - deploy_ssh_public_keys is sequence
+      - deploy_ssh_public_keys is not string
+      - deploy_ssh_public_keys | length >= 1
+      - deploy_ssh_public_keys | reject('match', preflight_ssh_key_re) | list | length == 0
+      - ghcr_owner is defined
+      - ghcr_owner is match('^[a-z0-9][a-z0-9-]{0,38}$')
+      - image_tag is defined
+      - image_tag is match('^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$')
+      - image_tag != 'latest'
+      - site_address is match('^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$')
+      - app_base_url is match('^https://[^\s\x27"]+$')
+      - caddy_tls is defined
+      - caddy_tls is match('^[^\s\x27"]+$')
+      - http_port | string is match('^([0-9.]+:)?[0-9]{1,5}$')
+      - https_port | string is match('^([0-9.]+:)?[0-9]{1,5}$')
+      - mail_transport in ['smtp', 'memory']
+      - trust_proxy | string is match('^[^\s\x27"]+$')
+      - log_level in ['fatal', 'error', 'warn', 'info', 'debug', 'trace']
+      - postgres_user is match('^[a-z_][a-z0-9_]{0,62}$')
+      - postgres_db is match('^[A-Za-z0-9_-]{1,63}$')
+      - backup_retention_days | int >= 1
+      - backup_retention_days | int <= 3650
+      - backup_remote | string is match('^[^\s\x27"]*$')
+      - backup_rclone_config | string is match('^(/[^\s\x27"]*)?$')
+      - (ghcr_username | default('') | length > 0) == (ghcr_token | default('') | length > 0)
+      - 22 in (ufw_allowed_tcp_ports | map('int') | list)
+    fail_msg: >-
+      Invalid settings: check deploy_user, deploy_ssh_public_keys (a list of
+      OpenSSH public keys), ghcr_owner (lower-case), image_tag (an immutable tag, not latest), site_address,
+      app_base_url (https://...), caddy_tls, http_port/https_port, mail_transport, trust_proxy, log_level,
+      postgres_user/postgres_db, backup_retention_days (1..3650), backup_remote, backup_rclone_config, and that
+      ghcr_username and ghcr_token are either both set or both empty, and that ufw_allowed_tcp_ports keeps 22. See defaults/main.yml of each role and README.md.
+    quiet: true
+
+# Docker publishes ports around ufw (README.md): whatever Caddy publishes must be a port ufw is meant to allow.
+- name: Check Caddy publishes only ports that ufw allows
+  ansible.builtin.assert:
+    that:
+      - (http_port | string).split(':')[-1] | int in (ufw_allowed_tcp_ports | map('int') | list)
+      - (https_port | string).split(':')[-1] | int in (ufw_allowed_tcp_ports | map('int') | list)
+    fail_msg: >-
+      http_port and https_port must use ports listed in ufw_allowed_tcp_ports ({{ ufw_allowed_tcp_ports | join(', ') }};
+      normally exactly 80 and 443). Docker publishes ports around ufw, so any other port would be open to the
+      internet without a ufw rule.
+    quiet: true
+
+- name: Check smtp_url is set when mail is delivered over SMTP (value never printed)
+  ansible.builtin.assert:
+    that:
+      - mail_transport != 'smtp' or (smtp_url | default('') is match('^smtps?://[^\s\x27"<>]+$'))
+    fail_msg: >-
+      smtp_url must be smtp://... or smtps://... (no quotes, spaces or angle brackets) when mail_transport is smtp.
+    quiet: true
+
+- name: Check smtp_url is not placeholder text (value never printed)
+  ansible.builtin.assert:
+    that:
+      - not (smtp_url | default('') | string | lower is search(preflight_placeholder_pattern))
+    fail_msg: >-
+      smtp_url looks like placeholder text (contains replace-with, changeme, placeholder, <...>): use the real SMTP
+      credentials.
+    quiet: true
+  when: mail_transport == 'smtp'
+
+- name: Check ghcr_token is not placeholder text (value never printed)
+  ansible.builtin.assert:
+    that:
+      - not (ghcr_token | string | lower is search(preflight_placeholder_pattern))
+    fail_msg: ghcr_token looks like placeholder text (contains replace-with, changeme, placeholder, <...>).
+    quiet: true
+  when: ghcr_token | default('') | length > 0
+
+- name: Look up admin_user on the host
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ admin_user }}"]
+  register: preflight_admin_passwd
+  changed_when: false
+  failed_when: false
+
+- name: Check admin_user exists
+  ansible.builtin.assert:
+    that:
+      - preflight_admin_passwd.rc == 0
+    fail_msg: >-
+      admin_user '{{ admin_user }}' does not exist on the host. sshd will admit only deploy and admin_user after
+      this play: create the admin account (with sudo and an SSH key) first, or you will be locked out.
+    quiet: true
+
+- name: Look up admin_user's authorized_keys
+  ansible.builtin.stat:
+    path: "{{ preflight_admin_passwd.stdout.split(':')[5] }}/.ssh/authorized_keys"
+  register: preflight_admin_keys
+  when: preflight_require_admin_authorized_keys | bool
+
+- name: Check admin_user can log in with a key after hardening
+  ansible.builtin.assert:
+    that:
+      - preflight_admin_keys.stat.exists
+      - preflight_admin_keys.stat.size > 0
+    fail_msg: >-
+      {{ admin_user }} has no (or an empty) ~/.ssh/authorized_keys. Password login is disabled by this play, so you
+      would be locked out. Install the admin's public key first (or set preflight_require_admin_authorized_keys:
+      false if keys come from AuthorizedKeysCommand / certificates).
+    quiet: true
+  when: preflight_require_admin_authorized_keys | bool
+
+# The SSH login of THIS run: ansible_user when set (inventory / -e / -u), otherwise the account sudo was invoked
+# from (SUDO_USER, i.e. the SSH login when Ansible's default remote user is used; also the operator's account for
+# `connection: local` run with sudo on the host), otherwise the effective user (root when connected as root).
+- name: Check the account this play connects as is still admitted after hardening
+  ansible.builtin.assert:
+    that:
+      - preflight_connecting_user in [admin_user, deploy_user]
+    fail_msg: >-
+      This play connects as '{{ preflight_connecting_user }}', which is not in AllowUsers ({{ deploy_user }}
+      {{ admin_user }}): after hardening you could not log in as it again. Connect as admin_user (ansible_user =
+      admin_user), or set allow_connecting_user_not_in_allowusers: true if that is really intended.
+    quiet: true
+  vars:
+    preflight_connecting_user: >-
+      {{ ansible_user | default(ansible_facts['env']['SUDO_USER'] | default(ansible_facts['user_id'], true), true) }}
+  when: not (allow_connecting_user_not_in_allowusers | bool)

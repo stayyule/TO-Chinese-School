@@ -1,0 +1,13 @@
+# {{ ansible_managed }} (deploy/ansible, role app)
+[Unit]
+Description=Daily TOCS database backup (02:30 Pacific)
+
+[Timer]
+OnCalendar={{ backup_on_calendar }}
+Persistent=true
+RandomizedDelaySec={{ backup_randomized_delay }}
+AccuracySec=1min
+Unit=tocs-backup.service
+
+[Install]
+WantedBy=timers.target
