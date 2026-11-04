@@ -7,12 +7,14 @@ import { PERMISSION_CODES } from '../src/access/permission-codes';
 import { AppModule } from '../src/app.module';
 import { AuditService } from '../src/audit/audit.service';
 import { SessionService } from '../src/auth/session.service';
+import { Clock, FixedClock } from '../src/common/clock';
 import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { seed } from '../prisma/seed';
 import { appRoleUrl, resetDatabase, testDatabaseUrl } from './helpers/db';
 
 const CSRF = 'csrf-token-for-tests';
+const T0 = new Date('2026-09-01T12:00:00Z');
 
 describe('roles administration API (app connected as tocs_app)', () => {
   const admin = new PrismaClient({ datasourceUrl: testDatabaseUrl() });
@@ -45,7 +47,12 @@ describe('roles administration API (app connected as tocs_app)', () => {
   const audits = (action: string) => admin.auditLog.findMany({ where: { action }, orderBy: { id: 'asc' } });
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(PrismaService).useValue(appPrisma).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(PrismaService)
+      .useValue(appPrisma)
+      .overrideProvider(Clock)
+      .useValue(new FixedClock(T0))
+      .compile();
     app = moduleRef.createNestApplication();
     configureApp(app);
     await app.init();
@@ -202,6 +209,75 @@ describe('roles administration API (app connected as tocs_app)', () => {
     it('404 ROLE_NOT_FOUND / 422 for bad ids', async () => {
       expect((await write('delete', `/api/v1/roles/999999/users/1`, rootSid)).body.code).toBe('ROLE_NOT_FOUND');
       expect((await write('delete', `/api/v1/roles/${studentRoleId}/users/abc`, rootSid)).status).toBe(422);
+    });
+  });
+
+  describe('Super User membership guard', () => {
+    /** A non-Super user holding access.roles.manage_users through a custom role. */
+    async function roleAdmin(): Promise<{ sid: string; userId: number }> {
+      const role = await admin.role.create({ data: { name: 'Role Admin' } });
+      const perm = await admin.permission.findUniqueOrThrow({ where: { code: 'access.roles.manage_users' } });
+      await admin.rolePermission.create({ data: { roleId: role.id, permissionId: perm.id } });
+      return sessionFor('ra', 'Role Admin');
+    }
+    const removeUser = (roleId: number, userId: number, sid = rootSid) =>
+      write('delete', `/api/v1/roles/${roleId}/users/${userId}`, sid);
+
+    it('a non-Super user with access.roles.manage_users cannot add anyone (self included) to Super User: 403', async () => {
+      const ra = await roleAdmin();
+      await sessionFor('bob', null);
+      for (const who of ['ra', 'bob']) {
+        const res = await addUser(superRoleId, who, ra.sid);
+        expect(res.status).toBe(403);
+        expect(res.body.code).toBe('FORBIDDEN');
+      }
+      expect(await memberRows(superRoleId, ra.userId)).toBe(0);
+      expect(await audits('access.role_user_added')).toHaveLength(0);
+      // ... while other roles stay manageable for them.
+      expect((await addUser(studentRoleId, 'bob', ra.sid)).status).toBe(204);
+    });
+
+    it('a non-Super user with access.roles.manage_users cannot remove a Super User: 403', async () => {
+      const ra = await roleAdmin();
+      const other = await sessionFor('su2', 'Super User');
+      const res = await removeUser(superRoleId, other.userId, ra.sid);
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('FORBIDDEN');
+      expect(await memberRows(superRoleId, other.userId)).toBe(1);
+      expect(await audits('access.role_user_removed')).toHaveLength(0);
+    });
+
+    it('a Super User can add another user to Super User (timestamps from the injected Clock)', async () => {
+      const { userId } = await sessionFor('bob', null);
+      expect((await addUser(superRoleId, 'bob')).status).toBe(204);
+      const row = await admin.roleUser.findFirstOrThrow({ where: { roleId: superRoleId, userId } });
+      expect(row.createdAt?.toISOString()).toBe(T0.toISOString());
+      expect(row.updatedAt?.toISOString()).toBe(T0.toISOString());
+    });
+
+    it('removing the last Super User is 409 LAST_SUPER_USER (duplicate rows of one user count once)', async () => {
+      await admin.$executeRaw`INSERT INTO roles_users (role_id, user_id) VALUES (${superRoleId}, ${rootId})`;
+      const res = await removeUser(superRoleId, rootId);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('LAST_SUPER_USER');
+      expect(await memberRows(superRoleId, rootId)).toBe(2);
+      expect(await audits('access.role_user_removed')).toHaveLength(0);
+    });
+
+    it('removing a Super User who is not the last one works', async () => {
+      const other = await sessionFor('su2', 'Super User');
+      expect((await removeUser(superRoleId, other.userId)).status).toBe(204);
+      expect(await memberRows(superRoleId, other.userId)).toBe(0);
+      expect(await audits('access.role_user_removed')).toHaveLength(1);
+    });
+
+    it('concurrent removals of the only two Super Users leave exactly one', async () => {
+      const other = await sessionFor('su2', 'Super User');
+      const results = await Promise.all([removeUser(superRoleId, rootId, other.sid), removeUser(superRoleId, other.userId)]);
+      // The loser is refused: 403 (its actor was just removed) or 409 (it would remove the last one).
+      expect(results.filter((r) => r.status === 204)).toHaveLength(1);
+      expect(results.every((r) => [204, 403, 409].includes(r.status))).toBe(true);
+      expect(await admin.roleUser.count({ where: { roleId: superRoleId } })).toBe(1);
     });
   });
 
