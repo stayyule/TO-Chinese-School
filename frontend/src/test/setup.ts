@@ -34,3 +34,7 @@ if (!('ResizeObserver' in globalThis)) {
     disconnect(): void {}
   } as unknown as typeof ResizeObserver
 }
+
+// jsdom does not implement getComputedStyle(el, pseudoElement), which Ant Design's Table calls to measure scrollbars.
+const realGetComputedStyle = window.getComputedStyle.bind(window)
+window.getComputedStyle = (element: Element) => realGetComputedStyle(element)

@@ -5,13 +5,20 @@ import { PATHS } from '../../routes/paths'
 import { requiredRule } from '../public/shared'
 import { MAX_BIRTH_YEAR, digitCount } from './helpers'
 
-export function FormActions({ busy }: { busy: boolean }) {
+/** Save button plus Cancel: a link (path, default the parent family page) or a button when given a callback. */
+export function FormActions({ busy, cancelTo = PATHS.parentFamily, saveLabel = t('common.save') }: { busy: boolean; cancelTo?: string | (() => void); saveLabel?: string }) {
   return (
     <Space>
       <Button type="primary" htmlType="submit" loading={busy}>
-        {t('common.save')}
+        {saveLabel}
       </Button>
-      <Link to={PATHS.parentFamily}>{t('family.cancel')}</Link>
+      {typeof cancelTo === 'function' ? (
+        <Button type="link" onClick={cancelTo}>
+          {t('family.cancel')}
+        </Button>
+      ) : (
+        <Link to={cancelTo}>{t('family.cancel')}</Link>
+      )}
     </Space>
   )
 }
@@ -21,20 +28,20 @@ export function FormError({ message }: { message: string | null }) {
 }
 
 /** Birth fields are shown (and required) for children only; parents keep any stored values unchanged. */
-export function PersonFields({ showBirth }: { showBirth: boolean }) {
+export function PersonFields({ showBirth, prefix = [] }: { showBirth: boolean; prefix?: string[] }) {
   const maxYear = MAX_BIRTH_YEAR
   return (
     <>
-      <Form.Item name="englishFirstName" label={t('person.englishFirstName')} rules={[requiredRule]}>
+      <Form.Item name={[...prefix, 'englishFirstName']} label={t('person.englishFirstName')} rules={[requiredRule]}>
         <Input />
       </Form.Item>
-      <Form.Item name="englishLastName" label={t('person.englishLastName')} rules={[requiredRule]}>
+      <Form.Item name={[...prefix, 'englishLastName']} label={t('person.englishLastName')} rules={[requiredRule]}>
         <Input />
       </Form.Item>
-      <Form.Item name="chineseName" label={t('person.chineseName')}>
+      <Form.Item name={[...prefix, 'chineseName']} label={t('person.chineseName')}>
         <Input lang="zh" />
       </Form.Item>
-      <Form.Item name="gender" label={t('person.gender')} rules={[{ required: true, message: t('error.required') }]}>
+      <Form.Item name={[...prefix, 'gender']} label={t('person.gender')} rules={[{ required: true, message: t('error.required') }]}>
         <Radio.Group
           options={[
             { value: 'M', label: t('person.male') },
@@ -42,13 +49,13 @@ export function PersonFields({ showBirth }: { showBirth: boolean }) {
           ]}
         />
       </Form.Item>
-      <Form.Item name="nativeLanguage" label={t('person.nativeLanguage')}>
+      <Form.Item name={[...prefix, 'nativeLanguage']} label={t('person.nativeLanguage')}>
         <Input />
       </Form.Item>
       {showBirth && (
         <>
           <Form.Item
-            name="birthYear"
+            name={[...prefix, 'birthYear']}
             label={t('person.birthYear')}
             rules={[
               { required: true, message: t('error.required') },
@@ -58,7 +65,7 @@ export function PersonFields({ showBirth }: { showBirth: boolean }) {
             <InputNumber precision={0} controls={false} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item
-            name="birthMonth"
+            name={[...prefix, 'birthMonth']}
             label={t('person.birthMonth')}
             rules={[
               { required: true, message: t('error.required') },
@@ -73,23 +80,23 @@ export function PersonFields({ showBirth }: { showBirth: boolean }) {
   )
 }
 
-export function AddressFields() {
+export function AddressFields({ prefix = [] }: { prefix?: string[] }) {
   return (
     <>
-      <Form.Item name="street" label={t('address.street')} rules={[requiredRule]}>
+      <Form.Item name={[...prefix, 'street']} label={t('address.street')} rules={[requiredRule]}>
         <Input autoComplete="address-line1" />
       </Form.Item>
-      <Form.Item name="city" label={t('address.city')} rules={[requiredRule]}>
+      <Form.Item name={[...prefix, 'city']} label={t('address.city')} rules={[requiredRule]}>
         <Input autoComplete="address-level2" />
       </Form.Item>
-      <Form.Item name="state" label={t('address.state')} rules={[requiredRule]}>
+      <Form.Item name={[...prefix, 'state']} label={t('address.state')} rules={[requiredRule]}>
         <Input autoComplete="address-level1" />
       </Form.Item>
-      <Form.Item name="zipcode" label={t('address.zipcode')} rules={[requiredRule, { pattern: /^\d{1,5}$/, message: t('address.zipcodeFormat') }]}>
+      <Form.Item name={[...prefix, 'zipcode']} label={t('address.zipcode')} rules={[requiredRule, { pattern: /^\d{1,5}$/, message: t('address.zipcodeFormat') }]}>
         <Input autoComplete="postal-code" inputMode="numeric" maxLength={5} />
       </Form.Item>
       <Form.Item
-        name="homePhone"
+        name={[...prefix, 'homePhone']}
         label={t('address.homePhone')}
         rules={[
           requiredRule,
@@ -99,13 +106,13 @@ export function AddressFields() {
         <Input autoComplete="tel" inputMode="tel" />
       </Form.Item>
       <Form.Item
-        name="cellPhone"
+        name={[...prefix, 'cellPhone']}
         label={t('address.cellPhone')}
         rules={[{ validator: (_, v: string | undefined) => (!v || digitCount(v) > 0 ? Promise.resolve() : Promise.reject(new Error(t('address.cellPhoneFormat')))) }]}
       >
         <Input autoComplete="tel" inputMode="tel" />
       </Form.Item>
-      <Form.Item name="email" label={t('address.email')} rules={[requiredRule, { type: 'email', message: t('error.INVALID') }]}>
+      <Form.Item name={[...prefix, 'email']} label={t('address.email')} rules={[requiredRule, { type: 'email', message: t('error.INVALID') }]}>
         <Input autoComplete="email" inputMode="email" />
       </Form.Item>
     </>

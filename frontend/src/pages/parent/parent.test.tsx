@@ -204,4 +204,30 @@ describe('add parent and edit person', () => {
     expect(await screen.findByDisplayValue('(805) 555-1234')).toBeInTheDocument()
     expect(screen.getByLabelText('Zip code')).toHaveAttribute('maxlength', '5')
   })
+
+  it('blocks a 9-digit home phone and accepts a 10-digit one', async () => {
+    mockMe(PERMS)
+    let patches = 0
+    server.use(
+      families(),
+      csrf,
+      http.patch('/api/v1/me/families/5/address', () => {
+        patches += 1
+        return HttpResponse.json(address)
+      }),
+    )
+    const router = renderApp('/parent/families/5/address')
+    const user = userEvent.setup()
+    const phone = await screen.findByLabelText('Home phone')
+    await user.clear(phone)
+    await user.type(phone, '(805) 555-123')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Home phone must have 10 digits')).toBeInTheDocument()
+    expect(patches).toBe(0)
+    await user.clear(phone)
+    await user.type(phone, '(805) 555-1234')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/parent/family'))
+    expect(patches).toBe(1)
+  })
 })
