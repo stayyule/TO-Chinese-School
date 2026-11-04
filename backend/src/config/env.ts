@@ -37,6 +37,37 @@ export function parseTrustProxy(raw: string | undefined): number | string {
   return entries.join(', ');
 }
 
+/** Placeholder text from example env files: such a value must never be accepted as a real secret. */
+const PLACEHOLDER = /replace-with|changeme/i;
+/** In production the dev example's `change-me-to-a-long-random-string` is refused as well. */
+const PRODUCTION_PLACEHOLDER = /replace-with|changeme|change-me/i;
+
+/** The password part of a connection URL ('' when absent or the URL does not parse). */
+const urlPassword = (url: string): string => {
+  try {
+    return decodeURIComponent(new URL(url).password);
+  } catch {
+    return '';
+  }
+};
+
+const rejectPlaceholders = (
+  v: { NODE_ENV: string; SESSION_SECRET: string; DATABASE_URL: string; DATABASE_MIGRATOR_URL: string },
+  ctx: z.RefinementCtx,
+): void => {
+  const pattern = v.NODE_ENV === 'production' ? PRODUCTION_PLACEHOLDER : PLACEHOLDER;
+  const secrets: [string, string][] = [
+    ['SESSION_SECRET', v.SESSION_SECRET],
+    ['DATABASE_URL', urlPassword(v.DATABASE_URL)],
+    ['DATABASE_MIGRATOR_URL', urlPassword(v.DATABASE_MIGRATOR_URL)],
+  ];
+  for (const [key, value] of secrets) {
+    if (pattern.test(value)) {
+      ctx.addIssue({ code: 'custom', path: [key], message: `${key} still contains example placeholder text; generate a real secret` });
+    }
+  }
+};
+
 const baseSchema = z.object({
   DATABASE_URL: z.string().min(1),
   DATABASE_MIGRATOR_URL: z.string().min(1),
@@ -64,7 +95,10 @@ const requireSmtpUrl = (v: { MAIL_TRANSPORT: string; SMTP_URL?: string }, ctx: z
   }
 };
 
-const schema = baseSchema.superRefine(requireSmtpUrl);
+const schema = baseSchema.superRefine((v, ctx) => {
+  requireSmtpUrl(v, ctx);
+  rejectPlaceholders(v, ctx);
+});
 
 export type Env = z.infer<typeof schema>;
 

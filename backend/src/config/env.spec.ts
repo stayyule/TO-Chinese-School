@@ -37,6 +37,35 @@ describe('loadEnv', () => {
   });
 });
 
+describe('placeholder secrets', () => {
+  it('rejects a SESSION_SECRET containing example placeholder text', () => {
+    for (const secret of ['replace-with-64-hex-characters-xxxxxxxxxxxxxxxxxxxxxxxx', 'CHANGEME'.padEnd(40, 'x')]) {
+      expect(() => loadEnv({ ...valid, SESSION_SECRET: secret })).toThrow(/SESSION_SECRET.*placeholder/);
+    }
+  });
+
+  it('rejects placeholder database passwords (percent-encoded too)', () => {
+    expect(() => loadEnv({ ...valid, DATABASE_URL: 'postgresql://tocs_app:replace-with-random-hex@db/tocs' })).toThrow(
+      /DATABASE_URL.*placeholder/,
+    );
+    expect(() => loadEnv({ ...valid, DATABASE_MIGRATOR_URL: 'postgresql://m:x%63hangeme@db/tocs' })).toThrow(
+      /DATABASE_MIGRATOR_URL.*placeholder/,
+    );
+  });
+
+  it('refuses the dev example secret (change-me-...) only in production', () => {
+    const dev = { ...valid, SESSION_SECRET: 'change-me-to-a-long-random-string' };
+    expect(loadEnv(dev).SESSION_SECRET).toBe(dev.SESSION_SECRET);
+    expect(() => loadEnv({ ...dev, NODE_ENV: 'production' })).toThrow(/SESSION_SECRET.*placeholder/);
+  });
+
+  it('accepts real random values and password-less URLs', () => {
+    expect(() =>
+      loadEnv({ ...valid, SESSION_SECRET: 'a3f9'.repeat(16), DATABASE_MIGRATOR_URL: 'postgresql://tocs_migrator@db/tocs', NODE_ENV: 'production' }),
+    ).not.toThrow();
+  });
+});
+
 describe('parseTrustProxy / TRUST_PROXY', () => {
   it('defaults to loopback, linklocal, uniquelocal when unset or blank', () => {
     expect(parseTrustProxy(undefined)).toBe(DEFAULT_TRUST_PROXY);
