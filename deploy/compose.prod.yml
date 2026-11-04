@@ -5,7 +5,9 @@
 # Only caddy publishes host ports. postgres sits on the `internal` network (no host port, no outbound route); the
 # api joins `edge` (reached only by caddy; outbound SMTP) and `internal`. `migrate` runs once per `up` and must
 # succeed before the api starts; the api entrypoint never migrates.
-# Variables marked :? are required; compose refuses to start without them.
+# Variables marked :? are required; compose refuses to start while they are unset or empty.
+# BEFORE THE FIRST `up`: restore the legacy baseline (production dump) into the postgres volume. On an empty database
+# the foundation migration fails, `migrate` exits non-zero and the api never starts.
 
 name: tocs
 
@@ -26,6 +28,7 @@ services:
   caddy:
     image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/tocs-web:${IMAGE_TAG:?set IMAGE_TAG}
     <<: *hardening
+    init: true
     restart: unless-stopped
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-register.to-cs.org}
@@ -45,6 +48,7 @@ services:
   api:
     image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/tocs-api:${IMAGE_TAG:?set IMAGE_TAG}
     <<: *hardening
+    init: true
     restart: unless-stopped
     environment:
       NODE_ENV: production

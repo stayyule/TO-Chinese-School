@@ -6,8 +6,10 @@
 #   bash deploy/test/stack.test.sh                (needs docker + compose v2, curl, openssl; run where the engine is)
 #
 # Environment: STACK_HTTPS_PORT (default 18443), STACK_HTTP_PORT (default 18080), KEEP_IMAGES=1 to keep the images,
-# STACK_TRUST_PROXY (default 1, as in production; set "loopback, linklocal, uniquelocal" to prove that Caddy itself
-# overwrites a spoofed X-Forwarded-For even when the api would trust every private-network hop).
+# STACK_TRUST_PROXY (api TRUST_PROXY for this run; default "loopback, linklocal, uniquelocal", the PERMISSIVE value:
+# the api then believes every private-network hop, so the X-Forwarded-For spoof check only passes if Caddy itself
+# overwrites the client's header; an appended "1.2.3.4, <peer>" would make req.ip 1.2.3.4. That production defaults
+# TRUST_PROXY to 1 is asserted separately from `compose config`.)
 # The throwaway credentials are random per run, live only in a temp env file, and are never printed.
 set -euo pipefail
 
@@ -73,7 +75,7 @@ TOCS_APP_PASSWORD=${TOCS_APP_PASSWORD}
 SESSION_SECRET=${SESSION_SECRET}
 MAIL_TRANSPORT=memory
 SMTP_URL=
-TRUST_PROXY=${STACK_TRUST_PROXY:-1}
+TRUST_PROXY=${STACK_TRUST_PROXY:-loopback, linklocal, uniquelocal}
 EOF
 
 echo "--- build + up (project $PROJECT)"
@@ -82,6 +84,32 @@ if [ ! -f "$DEPLOY/compose.prod.yml" ] || [ ! -f "$HERE/compose.test.yml" ]; the
   echo "RESULT: $PASSES passed, $FAILURES failed"
   exit 1
 fi
+# --- configuration checks (no containers are created)
+prod_config() { # prod_config <env-file> <compose config args...>
+  local env_file=$1
+  shift
+  docker compose -p "$PROJECT" --env-file "$env_file" -f "$DEPLOY/compose.prod.yml" config "$@"
+}
+EXAMPLE_OUT="$WORK/example-config.out"
+if prod_config "$DEPLOY/.env.prod.example" -q >"$EXAMPLE_OUT" 2>&1; then
+  fail "an unmodified copy of .env.prod.example is refused by compose"
+else
+  pass "an unmodified copy of .env.prod.example is refused by compose ($(head -c 120 "$EXAMPLE_OUT" | tr '\n' ' '))"
+fi
+# Non-secret deployment values filled in, secrets still empty: still refused, naming a secret.
+PARTIAL_ENV="$WORK/partial.env"
+sed -e 's/^GHCR_OWNER=$/GHCR_OWNER=local/' -e 's/^IMAGE_TAG=$/IMAGE_TAG=test/' -e 's/^CADDY_TLS=$/CADDY_TLS=internal/' \
+  "$DEPLOY/.env.prod.example" >"$PARTIAL_ENV"
+check "example with only the non-secret values filled is still refused (empty secret)" \
+  bash -c '! out=$("${@:2}" 2>&1) && grep -Eq "SESSION_SECRET|PASSWORD" <<<"$out"' _ x \
+  docker compose -p "$PROJECT" --env-file "$PARTIAL_ENV" -f "$DEPLOY/compose.prod.yml" config -q
+NO_TRUST_ENV="$WORK/no-trust.env"
+grep -v '^TRUST_PROXY=' "$ENV_FILE" >"$NO_TRUST_ENV"
+DEFAULT_TRUST="$(prod_config "$NO_TRUST_ENV" --format json 2>/dev/null | jq -r '.services.api.environment.TRUST_PROXY' || true)"
+check "compose.prod.yml defaults the api's TRUST_PROXY to 1 (got '$DEFAULT_TRUST')" test "$DEFAULT_TRUST" = 1
+check "compose.prod.yml gives the api a password-less DATABASE_MIGRATOR_URL" \
+  test "$(prod_config "$NO_TRUST_ENV" --format json 2>/dev/null | jq -r '.services.api.environment.DATABASE_MIGRATOR_URL')" = "postgresql://tocs_migrator@postgres:5432/tocs"
+
 if ! compose up -d --build --wait --wait-timeout 300; then
   fail "stack starts and becomes healthy"
   compose ps -a || true
@@ -93,6 +121,15 @@ pass "stack starts and becomes healthy (migrate completed, api + postgres health
 
 C=(curl -sk --max-time 15)
 hdr() { { grep -i "^$2:" "$1" || true; } | head -1 | cut -d: -f2- | tr -d '\r' | sed 's/^ *//'; }
+# security_headers <label> <header-file>: the edge headers every response (errors included) must carry.
+security_headers() {
+  local label=$1 file=$2
+  check "$label: CSP present" bash -c 'grep -qi "^content-security-policy: default-src '"'"'self'"'"'" "$1"' _ "$file"
+  check "$label: HSTS present" bash -c 'grep -qi "^strict-transport-security: max-age=" "$1"' _ "$file"
+  check "$label: X-Content-Type-Options nosniff" bash -c 'grep -qi "^x-content-type-options: nosniff" "$1"' _ "$file"
+  check "$label: X-Frame-Options DENY" bash -c 'grep -qi "^x-frame-options: DENY" "$1"' _ "$file"
+  check "$label: no Server header" bash -c '! grep -qi "^server:" "$1"' _ "$file"
+}
 
 # Caddy has no healthcheck of its own: wait (max 60 s) until it answers over TLS (internal CA issuance included).
 for _ in $(seq 1 60); do
@@ -137,8 +174,11 @@ if [ -n "$ASSET" ]; then
   check "hashed asset is immutable with a long max-age" bash -c 'grep -qi "^cache-control:.*max-age=31536000.*immutable" "$1"' _ "$ASSET_HEADERS"
   check "hashed asset is compressed" bash -c 'grep -qi "^content-encoding: gzip" "$1"' _ "$ASSET_HEADERS"
 fi
-MISSING_CODE="$("${C[@]}" -o /dev/null -w '%{http_code}' "$BASE/assets/does-not-exist-0000.js" || true)"
+MISSING_HEADERS="$WORK/missing.h"
+MISSING_CODE="$("${C[@]}" -D "$MISSING_HEADERS" -o /dev/null -w '%{http_code}' "$BASE/assets/does-not-exist-0000.js" || true)"
 check "missing hashed asset is 404 (no index.html fallback under /assets)" test "$MISSING_CODE" = 404
+security_headers "missing-asset 404" "$MISSING_HEADERS"
+check "missing-asset 404 is not cached as immutable" bash -c '! grep -qi "^cache-control:.*immutable" "$1"' _ "$MISSING_HEADERS"
 
 # --- API surface
 OPENAPI_CODE="$("${C[@]}" -o /dev/null -w '%{http_code}' "$BASE/api/v1/openapi.json" || true)"
@@ -154,9 +194,23 @@ check "csrf sets tocs_csrf cookie with Secure" bash -c 'grep -i "^set-cookie: to
 check "csrf response carries HSTS" bash -c 'grep -qi "^strict-transport-security:" "$1"' _ "$CSRF_HEADERS"
 check "/api responses are Cache-Control: no-store" bash -c 'grep -qi "^cache-control:.*no-store" "$1"' _ "$CSRF_HEADERS"
 
-# --- X-Forwarded-For spoofing: a client-supplied XFF must never become the API's req.ip (audit ip).
-PROBE_USER="xff-probe-$(rand 6)"
 TOKEN="$(awk '$6 == "tocs_csrf" { print $7 }' "$JAR" | tail -1)"
+
+# --- request size limit at the edge (the API's own JSON limit is 100 kB; Caddy refuses > 1 MB itself)
+BIG="$WORK/big.json"
+head -c 2097152 /dev/zero | tr '\0' 'a' >"$BIG"
+BIG_HEADERS="$WORK/big.h"
+BIG_BODY="$WORK/big.out"
+BIG_CODE="$("${C[@]}" -b "$JAR" -D "$BIG_HEADERS" -o "$BIG_BODY" -w '%{http_code}' -X POST "$BASE/api/v1/auth/login" \
+  -H 'Content-Type: application/json' -H "X-CSRF-Token: $TOKEN" --data-binary @"$BIG" || true)"
+check "2 MB POST to /api is refused with 413" test "$BIG_CODE" = 413
+check "the 413 comes from Caddy (not the api)" grep -q '^413' "$BIG_BODY"
+security_headers "413" "$BIG_HEADERS"
+
+# --- X-Forwarded-For spoofing: a client-supplied XFF must never become the API's req.ip (audit ip).
+API_TRUST="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(compose ps -q api)" | sed -n 's/^TRUST_PROXY=//p')"
+echo "info: api TRUST_PROXY for the spoof check: '$API_TRUST'"
+PROBE_USER="xff-probe-$(rand 6)"
 LOGIN_CODE="$("${C[@]}" -b "$JAR" -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/auth/login" \
   -H 'Content-Type: application/json' -H "X-CSRF-Token: $TOKEN" -H 'X-Forwarded-For: 1.2.3.4' -H 'X-Real-IP: 1.2.3.4' \
   --data "{\"username\":\"$PROBE_USER\",\"password\":\"not-the-password\"}" || true)"
@@ -196,6 +250,9 @@ CADDY_ID="$(compose ps -q caddy)"
 check "caddy runs as non-root, read_only, cap_drop ALL" \
   bash -c '[ "$(docker inspect -f "{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}}" "$1")" = "true [ALL]" ] && [ "$(docker exec "$1" id -u)" != 0 ]' _ "$CADDY_ID"
 check "migrate exited 0" test "$(docker inspect -f '{{.State.ExitCode}}' "$(compose ps -aq migrate)")" = 0
+check "api and caddy run under an init process (init: true)" \
+  test "$(docker inspect -f '{{.HostConfig.Init}}' "$API_ID" "$CADDY_ID" | tr '\n' ' ')" = "true true "
+check "api image user is numeric 1000:1000" test "$(docker inspect -f '{{.Config.User}}' "$API_ID")" = 1000:1000
 
 # --- secrets never in logs
 LOGS="$(compose logs --no-color 2>&1 || true)"
@@ -203,6 +260,14 @@ check "logs mention no secret value" bash -c 'for s in "${@:2}"; do [[ "$1" == *
   "$SESSION_SECRET" "$POSTGRES_PASSWORD" "$TOCS_MIGRATOR_PASSWORD" "$TOCS_APP_PASSWORD"
 check "caddy container env holds no database or session secret" \
   bash -c '! docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" "$1" | grep -Eq "PASSWORD|SECRET|DATABASE_URL"' _ "$CADDY_ID"
+
+# --- api down: Caddy's own 502 still carries the security headers (runs last: it stops the api)
+compose stop api >/dev/null 2>&1
+DOWN_HEADERS="$WORK/down.h"
+DOWN_CODE="$("${C[@]}" -D "$DOWN_HEADERS" -o /dev/null -w '%{http_code}' "$BASE/api/v1/me" || true)"
+check "with the api stopped, /api/v1/me returns 502" test "$DOWN_CODE" = 502
+security_headers "502" "$DOWN_HEADERS"
+check "502 is Cache-Control: no-store" bash -c 'grep -qi "^cache-control: no-store" "$1"' _ "$DOWN_HEADERS"
 
 echo "RESULT: $PASSES passed, $FAILURES failed"
 [ "$FAILURES" -eq 0 ]

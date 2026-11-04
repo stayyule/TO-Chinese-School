@@ -4,7 +4,7 @@
 #   docker build -f deploy/Dockerfile.backend --target migrate -t ghcr.io/<owner>/tocs-api:<tag>-migrate .
 # Targets:
 #   build   : full dependencies (dev included: nest CLI, prisma CLI), prisma generate + nest build
-#   runtime : production dependencies only + dist + generated Prisma client; runs as the unprivileged `node` user.
+#   runtime : production dependencies only + dist + generated Prisma client; runs as the unprivileged `node` user (uid/gid 1000).
 #             The entrypoint does NOT run migrations (that is the one-shot `migrate` service).
 #   migrate : prisma CLI + prisma/ (schema, migrations) + deploy/db/*.sql + psql; runs deploy/migrate.sh.
 # Base: Debian bookworm slim (glibc, OpenSSL 3.0) -> Prisma engine target debian-openssl-3.0.x, auto-detected at
@@ -59,8 +59,10 @@ COPY --from=build /app/dist ./dist
 COPY backend/package.json ./
 # Everything stays root-owned and read-only for the runtime user; compose additionally mounts / read-only.
 RUN node -e "require('argon2'); require('@prisma/client')" \
+ && [ "$(id -u node):$(id -g node)" = "1000:1000" ] \
  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/lib/node_modules/corepack /usr/local/bin/corepack
-USER node
+# Numeric (the image's `node` user, verified above) so runtimes can enforce non-root without resolving names.
+USER 1000:1000
 EXPOSE 3000
 CMD ["node", "dist/main.js"]
 
@@ -74,5 +76,5 @@ COPY backend/package.json ./
 COPY backend/prisma ./prisma
 COPY deploy/db/prisma-migrations-table.sql deploy/db/grants.sql ./db/
 COPY --chmod=0755 deploy/migrate.sh /usr/local/bin/tocs-migrate
-USER node
+USER 1000:1000
 CMD ["tocs-migrate"]

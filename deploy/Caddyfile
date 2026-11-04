@@ -56,8 +56,13 @@ http://{$SITE_ADDRESS} {
 	# checks it). With no trusted_proxies Caddy already does this by default and logs "Unnecessary header_up
 	# X-Forwarded-For" at startup; the explicit directive is kept so that a later trusted_proxies change cannot
 	# silently turn overwrite into append.
+	# request_body: JSON bodies are tiny (the API's own JSON parser caps them at 100 kB); anything over 1 MB is
+	# refused with 413 before it reaches the api.
 	@api path /api/* /healthz
 	handle @api {
+		request_body {
+			max_size 1MB
+		}
 		reverse_proxy api:3000 {
 			header_up X-Forwarded-For {remote_host}
 			header_up -X-Real-IP
@@ -80,5 +85,13 @@ http://{$SITE_ADDRESS} {
 		header Cache-Control "no-cache"
 		try_files {path} /index.html
 		file_server
+	}
+
+	# Errors Caddy generates itself (missing asset 404, 413, 502 when the api is down) carry the same security
+	# headers, are never cached, and expose only the status line.
+	handle_errors {
+		import security_headers
+		header Cache-Control "no-store"
+		respond "{err.status_code} {err.status_text}" {err.status_code}
 	}
 }
