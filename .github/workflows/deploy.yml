@@ -1,0 +1,100 @@
+# Deploy an already-built image tag to production (register.to-cs.org).
+#
+# Manual only (workflow_dispatch). The job runs in the GitHub Environment `production`. REQUIRED REPOSITORY SETUP
+# (done by a maintainer in Settings -> Environments -> production; this file cannot enforce it):
+#   - Required reviewers: at least one maintainer must approve every run before it starts.
+#   - Deployment branches: restrict to the default branch.
+#   - Environment secrets: DEPLOY_HOST (host name / IP), DEPLOY_USER (`deploy`), DEPLOY_SSH_KEY (private key of a
+#     key pair used only for deploys; the public half is in the deploy user's authorized_keys), DEPLOY_KNOWN_HOSTS
+#     (the host's `ssh-keyscan -t ed25519 <host>` line, verified out of band: the host key is pinned, never learned).
+#   - Environment variable (not a secret): SITE_ADDRESS, e.g. register.to-cs.org, for the smoke check.
+# The tag must be one CI has built and pushed (ghcr.io/<owner>/tocs-api|tocs-web:<tag>, typically the git SHA).
+# On the host, /opt/tocs/deploy.sh (installed from deploy/ by Ansible) takes a backup, records the previous tag,
+# pulls, migrates, restarts and health-checks, and rolls back to the previous tag on failure (exit non-zero).
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy (e.g. the full git SHA built by CI)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://${{ vars.SITE_ADDRESS }}
+    steps:
+      - name: Validate image tag
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
+            echo "::error::image_tag must match ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}\$"
+            exit 1
+          fi
+
+      - name: Configure SSH (pinned host key)
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "::error::DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS must be set on the production environment"
+            exit 1
+          fi
+          install -d -m 700 "$HOME/.ssh"
+          (umask 077 && printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key")
+          (umask 077 && printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts")
+
+      - name: Deploy over SSH
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          # IMAGE_TAG was validated above (letters, digits, '_', '.', '-'), so it is safe inside the remote command;
+          # it is still single-quoted for the remote shell.
+          ssh -i "$HOME/.ssh/deploy_key" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ServerAliveInterval=30 \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "/opt/tocs/deploy.sh '$IMAGE_TAG'"
+
+      - name: Smoke check (public URL)
+        env:
+          SITE_ADDRESS: ${{ vars.SITE_ADDRESS }}
+        run: |
+          if [[ ! "$SITE_ADDRESS" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]; then
+            echo "::error::environment variable SITE_ADDRESS must be a plain host name"
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5 6; do
+            if body="$(curl -fsS --max-time 10 "https://$SITE_ADDRESS/healthz")" && [ "$body" = '{"status":"ok"}' ]; then
+              echo "healthz ok"
+              exit 0
+            fi
+            echo "attempt $attempt: healthz not ok yet"
+            sleep 10
+          done
+          echo "::error::https://$SITE_ADDRESS/healthz did not return {\"status\":\"ok\"}"
+          exit 1
+
+      - name: Remove SSH material
+        if: always()
+        run: rm -rf "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
