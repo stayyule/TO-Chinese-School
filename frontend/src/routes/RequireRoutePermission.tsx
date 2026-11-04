@@ -4,7 +4,7 @@ import { useMe } from '../auth/useMe'
 import { Forbidden } from '../pages/Forbidden'
 
 /**
- * Route wrapper: renders the page only when the signed-in user holds  (or any of ), otherwise the
+ * Route wrapper: renders the page only when the signed-in user holds `code` (or any of `anyOf`), otherwise the
  * Forbidden page. Use as an element around a page (children) or as a layout route (Outlet). UI hint only; the API
  * enforces access.
  */
