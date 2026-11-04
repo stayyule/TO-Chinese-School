@@ -1,0 +1,24 @@
+---
+# Prepare a fresh Ubuntu 24.04 LTS host for the TOCS production stack (see README.md in this directory).
+#
+#   ansible-galaxy collection install -r requirements.yml
+#   ansible-playbook -i inventory.ini site.yml -e @secrets.yml --ask-vault-pass
+#
+# Roles, in order (each has a tag of the same name; `preflight` always runs):
+#   preflight  validates every variable and the host BEFORE anything changes (fails closed, prints no secret)
+#   hardening  packages, deploy user + SSH keys, sshd drop-in, fail2ban, unattended-upgrades, sysctl, ufw
+#   docker     Docker Engine + Compose plugin from Docker's apt repo (key pinned by fingerprint), daemon.json
+#   app        /opt/tocs (scripts, compose file, .env, backup.env), optional GHCR login, backup timer
+- name: Harden and prepare the TOCS production host
+  hosts: tocs
+  become: true
+  gather_facts: true
+  roles:
+    - role: preflight
+      tags: [always]
+    - role: hardening
+      tags: [hardening]
+    - role: docker
+      tags: [docker]
+    - role: app
+      tags: [app]

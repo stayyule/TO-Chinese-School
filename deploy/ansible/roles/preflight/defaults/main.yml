@@ -1,0 +1,11 @@
+---
+# Ubuntu releases this playbook has been tested on (deploy/test/ansible-check.sh). Others are refused.
+preflight_supported_releases: ["24.04"]
+
+# Refuse to run unless admin_user already has a non-empty ~/.ssh/authorized_keys on the host. After the play sshd
+# admits only `deploy` and admin_user, by key: this check is the guard against locking the operator out. Set to
+# false only when admin_user authenticates through another mechanism (AuthorizedKeysCommand, certificates).
+preflight_require_admin_authorized_keys: true
+
+# Lower-cased substrings that mark a value as an unfilled placeholder (checked for every secret).
+preflight_placeholder_pattern: "replace-with|replacewith|replace_with|changeme|change-me|change_me|placeholder|xxxxxxxx|<.*>"

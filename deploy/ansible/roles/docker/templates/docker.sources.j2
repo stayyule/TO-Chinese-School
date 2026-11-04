@@ -1,0 +1,7 @@
+# {{ ansible_managed }} (deploy/ansible, role docker)
+Types: deb
+URIs: {{ docker_apt_repo_url }}
+Suites: {{ ansible_facts['distribution_release'] }}
+Components: stable
+Architectures: {{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}
+Signed-By: {{ docker_apt_keyring }}

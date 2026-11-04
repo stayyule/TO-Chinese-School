@@ -18,3 +18,8 @@ dist/
 coverage/
 *.tsbuildinfo
 openapi.json
+
+# Ansible operator files (inventory and vault-encrypted secrets stay outside git)
+deploy/ansible/inventory.ini
+deploy/ansible/secrets*.yml
+deploy/ansible/*.vault.yml

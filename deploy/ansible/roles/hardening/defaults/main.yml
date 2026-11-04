@@ -1,0 +1,57 @@
+---
+# ---- Accounts
+# The account deploy.yml (GitHub Actions) logs in as; runs deploy.sh / docker compose. Key-only, password locked.
+deploy_user: deploy
+deploy_home: /home/deploy
+# REQUIRED, no default: list of OpenSSH public keys for deploy (the CI deploy key; optionally an operator key).
+# authorized_keys is rendered exclusively from this list: keys not listed are removed.
+# deploy_ssh_public_keys: ["ssh-ed25519 AAAA... tocs-deploy-ci"]
+# REQUIRED, no default: the existing sudo account the operator (and Ansible) logs in as. Must already have an SSH key.
+# admin_user: ubuntu
+
+# ---- sshd (drop-in /etc/ssh/sshd_config.d/00-tocs-hardening.conf; the first value read wins in OpenSSH, so this
+# file overrides 50-cloud-init.conf and the main sshd_config). sshd stays on port 22 (Ubuntu's ssh.socket).
+sshd_max_auth_tries: 3
+sshd_login_grace_time: 30
+sshd_client_alive_interval: 300
+sshd_client_alive_count_max: 2
+sshd_max_sessions: 4
+sshd_max_startups: "10:30:60"
+
+# ---- ufw: incoming default deny; ONLY these TCP ports are allowed. Any other rule found on the host fails the play.
+# 22 = sshd, 80/443 = Caddy (compose.prod.yml publishes nothing else). Keep 22 in the list or you lock yourself out.
+ufw_allowed_tcp_ports: [22, 80, 443]
+ufw_logging: low
+
+# ---- fail2ban sshd jail (systemd journal backend)
+fail2ban_sshd_maxretry: 5
+fail2ban_sshd_findtime: 10m
+fail2ban_sshd_bantime: 1h
+# Addresses never banned (e.g. the operator's static IP). Space-separated, fail2ban syntax.
+fail2ban_ignoreip: "127.0.0.1/8 ::1"
+
+# ---- unattended-upgrades: security pockets only (incl. Ubuntu Pro ESM when attached); never reboots by itself.
+# Kernel / libc updates need a manual reboot in a quiet window (check /var/run/reboot-required).
+unattended_upgrades_origins:
+  - "${distro_id}:${distro_codename}-security"
+  - "${distro_id}ESMApps:${distro_codename}-apps-security"
+  - "${distro_id}ESM:${distro_codename}-infra-security"
+unattended_upgrades_automatic_reboot: false
+unattended_upgrades_remove_unused_dependencies: true
+# Optional address for unattended-upgrades reports (needs a local MTA; empty = none).
+unattended_upgrades_mail: ""
+
+# ---- sysctl (network-namespace scoped, Docker-compatible: ip_forward is left to Docker)
+hardening_sysctl:
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+  net.ipv6.conf.all.accept_source_route: 0
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.icmp_echo_ignore_broadcasts: 1

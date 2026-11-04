@@ -1,0 +1,47 @@
+# {{ ansible_managed }} (deploy/ansible, role app)
+# Encrypted database backup (backup.sh streams pg_dump from the postgres compose service into age). Started by
+# tocs-backup.timer. backup.sh exits non-zero when postgres is unreachable or anything fails: the unit then ends in
+# state "failed" (systemctl --failed, journalctl -u tocs-backup.service). backup.sh reads backup.env itself.
+[Unit]
+Description=TOCS encrypted database backup
+Documentation=file://{{ tocs_app_dir }}/backup.sh
+After=docker.service network-online.target
+Wants=network-online.target
+{% if backup_on_failure_unit %}
+OnFailure={{ backup_on_failure_unit }}
+{% endif %}
+
+[Service]
+Type=oneshot
+User={{ deploy_user }}
+Group={{ deploy_user }}
+WorkingDirectory={{ tocs_app_dir }}
+ExecStart={{ tocs_app_dir }}/backup.sh {{ tocs_backup_dir }}
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h
+
+# Sandboxing. Access to /run/docker.sock (group docker) is kept: connecting to a socket works on a read-only mount.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{ tocs_backup_dir }}
+ReadWritePaths=-{{ deploy_home }}/.docker -{{ deploy_home }}/.cache/rclone -{{ deploy_home }}/.config/rclone
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=

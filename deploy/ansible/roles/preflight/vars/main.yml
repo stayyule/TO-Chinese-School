@@ -1,0 +1,35 @@
+---
+# Internal (not meant to be overridden). Secrets have NO defaults anywhere: each must be provided (ansible-vault).
+# Formats follow deploy/.env.prod.example: database passwords are letters and digits only (they are embedded in
+# connection URLs and PGOPTIONS); the session secret is >= 32 characters (the api refuses shorter ones).
+preflight_secrets:
+  - name: session_secret
+    min: 32
+    re: '^[A-Za-z0-9+/=._~-]+$'
+    desc: "at least 32 characters of [A-Za-z0-9+/=._~-] (generate: openssl rand -hex 32)"
+  - name: postgres_password
+    min: 16
+    re: '^[A-Za-z0-9]+$'
+    desc: "at least 16 letters/digits (generate: openssl rand -hex 24)"
+  - name: tocs_migrator_password
+    min: 16
+    re: '^[A-Za-z0-9]+$'
+    desc: "at least 16 letters/digits (generate: openssl rand -hex 24)"
+  - name: tocs_app_password
+    min: 16
+    re: '^[A-Za-z0-9]+$'
+    desc: "at least 16 letters/digits (generate: openssl rand -hex 24)"
+  - name: backup_age_recipient
+    min: 24
+    re: '^age1[0-9a-z]{20,}$'
+    desc: "an age PUBLIC key starting with age1 (age-keygen -y <identity file>), never the AGE-SECRET-KEY identity"
+
+preflight_ssh_key_types:
+  - ssh-ed25519
+  - sk-ssh-ed25519@openssh.com
+  - ecdsa-sha2-nistp256
+  - ecdsa-sha2-nistp384
+  - ecdsa-sha2-nistp521
+  - sk-ecdsa-sha2-nistp256@openssh.com
+  - ssh-rsa
+preflight_ssh_key_re: "^({{ preflight_ssh_key_types | map('regex_escape') | join('|') }}) [A-Za-z0-9+/]+={0,3}( [^\\r\\n]*)?$"

@@ -1,0 +1,56 @@
+---
+# ---- Layout (deploy.sh / backup.sh / compose.prod.yml assume /opt/tocs; change only together with them)
+tocs_app_dir: /opt/tocs
+tocs_backup_dir: /opt/tocs/backups
+# Where the files installed into tocs_app_dir come from: this repository's deploy/ directory.
+tocs_deploy_src_dir: "{{ playbook_dir }}/.."
+
+# ---- .env (rendered from these; names follow deploy/.env.prod.example). Non-secret values have defaults.
+# REQUIRED, no default: ghcr_owner (GitHub org/user that owns the images, lower-case) and image_tag (an immutable
+# tag such as the git SHA; deploy.sh overrides it per deploy through the environment, .env keeps the first one).
+# ghcr_owner: to-chinese-school
+# image_tag: 0123abc
+site_address: register.to-cs.org
+app_base_url: "https://{{ site_address }}"
+# REQUIRED, no default: caddy_tls, the ACME account e-mail (Caddy `tls` directive).
+# caddy_tls: admin@example.org
+http_port: 80
+https_port: 443
+mail_transport: smtp
+trust_proxy: 1
+log_level: info
+postgres_user: postgres
+postgres_db: tocs
+
+# ---- Secrets: NO defaults. Provide them from an ansible-vault encrypted file (README.md); preflight refuses empty,
+# short or placeholder values.
+# session_secret:          >= 32 chars          (openssl rand -hex 32)
+# smtp_url:                smtps://user:password@host:465   (required when mail_transport is smtp)
+# postgres_password:       letters/digits >= 16 (openssl rand -hex 24)
+# tocs_migrator_password:  letters/digits >= 16 (openssl rand -hex 24)
+# tocs_app_password:       letters/digits >= 16 (openssl rand -hex 24)
+
+# ---- backup.env (read by backup.sh). The age IDENTITY (private key) is never installed here.
+# REQUIRED, no default: backup_age_recipient, the age PUBLIC key (age1...).
+# backup_age_recipient: age1...
+# Optional rclone destination for off-site copies (e.g. offsite:tocs-backups); empty = local only.
+backup_remote: ""
+# Local retention in days (1..3650).
+backup_retention_days: 14
+# Optional absolute path of the rclone config file (create it by hand, owner deploy, mode 600). Empty = rclone's
+# default (~deploy/.config/rclone/rclone.conf).
+backup_rclone_config: ""
+
+# ---- Backup timer: daily at 02:30 Pacific (systemd OnCalendar with a time zone; DST handled by systemd).
+backup_on_calendar: "*-*-* 02:30:00 America/Los_Angeles"
+backup_randomized_delay: 5min
+# Optional unit started when a backup fails (e.g. a mail/alert unit you install yourself); empty = none.
+# A failed backup is always visible in `systemctl --failed` and `journalctl -u tocs-backup.service`.
+backup_on_failure_unit: ""
+
+# ---- GHCR login for deploy (optional; only when both are set, from the vault). A read-only token
+# (read:packages) is enough. Written to ~deploy/.docker/config.json (mode 600, base64, not encrypted).
+ghcr_username: ""
+ghcr_token: ""
+# Log in again even if config.json already holds ghcr.io credentials (token rotation).
+ghcr_force_login: false
