@@ -23,3 +23,6 @@ openapi.json
 deploy/ansible/inventory.ini
 deploy/ansible/secrets*.yml
 deploy/ansible/*.vault.yml
+
+# Local-only diagram
+docs/requirements/requirements-overview.excalidraw

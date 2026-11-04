@@ -1,4 +1,4 @@
-# Sub-project 1 (Foundation) Implementation Plan
+# Phase 1 (Foundation) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -82,7 +82,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase A — Foundations
+## Part A — Foundations
 
 ### Task 1: Scaffolding, dev stack, health endpoint
 
@@ -190,7 +190,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase B — Auth, access, audit
+## Part B — Auth, access, audit
 
 ### Task 7: Audit service
 
@@ -338,7 +338,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase C — Domain modules
+## Part C — Domain modules
 
 ### Task 15: People, address and family domain
 
@@ -426,7 +426,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase D — Front end
+## Part D — Front end
 
 ### Task 20: Front-end foundation (API client, auth context, router, layout)
 
@@ -466,7 +466,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 - Test: `frontend/src/pages/home/home.test.tsx`, `frontend/src/pages/parent/parent.test.tsx`.
 
 **Interfaces:**
-- Produces: `PANELS: { permission: string; title: string; links: {label: string; to: string}[] }[]` keyed by the `home.panel.*` codes; `HomePage` renders only the panels whose permission the user has (links for features from later sub-projects are omitted until they exist); `MyFamilyPage` at `/parent/family` lists the family, parents and children and links to the edit pages; forms mirror Task 15 validation (child requires birth year/month; zipcode 5 digits; phone 10 digits displayed as `(805) 555-1234`).
+- Produces: `PANELS: { permission: string; title: string; links: {label: string; to: string}[] }[]` keyed by the `home.panel.*` codes; `HomePage` renders only the panels whose permission the user has (links for features from later phases are omitted until they exist); `MyFamilyPage` at `/parent/family` lists the family, parents and children and links to the edit pages; forms mirror Task 15 validation (child requires birth year/month; zipcode 5 digits; phone 10 digits displayed as `(805) 555-1234`).
 
 - [ ] **Step 1: Write failing tests** — a Student Parent `/me` shows only the Student Parent panel; Super User shows every panel; Chinese names render unchanged; adding a child without birth month shows the field error and does not call the API; a 404 from the API on another family's id shows "Not found".
 - [ ] **Step 2: Run to verify failure.**
@@ -491,7 +491,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ---
 
-## Phase E — Delivery
+## Part E — Delivery
 
 ### Task 24: Container images, production Compose, Caddy
 
@@ -500,7 +500,7 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 - Test: `deploy/test/stack.test.sh`.
 
 **Interfaces:**
-- Produces: images `ghcr.io/<owner>/tocs-api` and `ghcr.io/<owner>/tocs-web`; Compose services `caddy`, `api`, `postgres`, `migrate` (one-shot, uses `DATABASE_MIGRATOR_URL`); networks: `edge` (caddy, api) and `internal` (api, postgres, migrate; no host port for postgres). `api` runs as non-root, `read_only: true`, `cap_drop: [ALL]`, tmpfs `/tmp`. Caddy serves the static front end, proxies `/api/*` and `/healthz` to `api`, falls back to `index.html` for client routes, sets `Strict-Transport-Security`, `Content-Security-Policy` (default-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; the gateway script origin is added by the payments sub-project), `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`.
+- Produces: images `ghcr.io/<owner>/tocs-api` and `ghcr.io/<owner>/tocs-web`; Compose services `caddy`, `api`, `postgres`, `migrate` (one-shot, uses `DATABASE_MIGRATOR_URL`); networks: `edge` (caddy, api) and `internal` (api, postgres, migrate; no host port for postgres). `api` runs as non-root, `read_only: true`, `cap_drop: [ALL]`, tmpfs `/tmp`. Caddy serves the static front end, proxies `/api/*` and `/healthz` to `api`, falls back to `index.html` for client routes, sets `Strict-Transport-Security`, `Content-Security-Policy` (default-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; the gateway script origin is added by the payments phase), `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`.
 
 - [ ] **Step 1: Write failing test** — `stack.test.sh` brings up the prod Compose with a local-HTTPS Caddy config and a throwaway database, then asserts: `curl -k https://localhost/healthz` returns `{"status":"ok"}`; response headers include HSTS and CSP; `curl https://localhost/some/client/route` returns the SPA HTML; Postgres is not reachable on any host port; `docker compose exec api id -u` is not `0`.
 - [ ] **Step 2: Run to verify failure.**
@@ -554,6 +554,6 @@ scripts/    check-migrations.mjs  check-schema-drift.mjs  gen-api.mjs
 
 ## Self-Review Notes
 
-- **Spec coverage:** spec §3 sub-project 1 → Tasks 1–27 (skeleton: 1, 24–27; login/reset: 8, 11–14, 21; users/roles/permissions: 9, 10; audit: 7; people/families: 15–17, 22–23; school year: 6, 18; grades/classes: 19). Spec §5 (sessions, tokens hashed, permission codes, default deny, object-level checks, audit) → 7–9, 11, 16. §6 (baseline, two accounts, additive migrations, Cents/PacificDate/Clock) → 3–5. §7 (error format, CSRF, DTO whitelist) → 2, 8. §8 (role-organized front end, error handling) → 20–23. §9 (Compose, Caddy, hardening, CI/CD, backups, rollback) → 24–27. **Deliberately not in this sub-project:** staff assignments, instructor assignments, class assignment, fees, payments, idempotency-key table (sub-projects 2–3); reports/forms/final marks (sub-project 4).
-- **Open items carried from the spec §11 (not blocking this plan):** production schema dump for `check-schema-drift.mjs` (Task 4 note), Postmark/SES choice and DNS (mail transport stays SMTP-URL configurable), merchant credentials (sub-project 2), off-host backup account (`BACKUP_REMOTE`), error-reporting service.
+- **Spec coverage:** spec §3 phase 1 → Tasks 1–27 (skeleton: 1, 24–27; login/reset: 8, 11–14, 21; users/roles/permissions: 9, 10; audit: 7; people/families: 15–17, 22–23; school year: 6, 18; grades/classes: 19). Spec §5 (sessions, tokens hashed, permission codes, default deny, object-level checks, audit) → 7–9, 11, 16. §6 (baseline, two accounts, additive migrations, Cents/PacificDate/Clock) → 3–5. §7 (error format, CSRF, DTO whitelist) → 2, 8. §8 (role-organized front end, error handling) → 20–23. §9 (Compose, Caddy, hardening, CI/CD, backups, rollback) → 24–27. **Deliberately not in this phase:** staff assignments, instructor assignments, class assignment, fees, payments, idempotency-key table (phases 2–3); reports/forms/final marks (phase 4).
+- **Open items carried from the spec §11 (not blocking this plan):** production schema dump for `check-schema-drift.mjs` (Task 4 note), Postmark/SES choice and DNS (mail transport stays SMTP-URL configurable), merchant credentials (phase 2), off-host backup account (`BACKUP_REMOTE`), error-reporting service.
 - **Type consistency:** `Cents`, `PacificDate`, `Clock`, `AppError`, `AuditService.record`, `SchoolYearLookup`, `AuthTokenService`, `PasswordService`, `PermissionCode` are defined once (Tasks 2–3, 6–9, 11) and only consumed afterwards.
