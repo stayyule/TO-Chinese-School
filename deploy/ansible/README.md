@@ -4,7 +4,7 @@
 
 | Role | What it does |
 |---|---|
-| `preflight` (always runs) | Checks every variable and the host **before anything changes**: secrets present, long enough, right format, not placeholder text (`replace-with`, `changeme`, ...); `backup_age_recipient` is an `age1...` public key; `admin_user` exists and already has an SSH key (lock-out guard); supported release. Fails with a message naming the variable, never its value. |
+| `preflight` (always runs) | Checks every variable and the host **before anything changes**: secrets present, long enough, right format, not placeholder text (`replace-with`, `changeme`, `<...>`, ...; also `smtp_url` and, when set, `ghcr_token`); `backup_age_recipient` is an `age1...` public key; `admin_user` is not root/deploy, exists and already has an SSH key, and the account the play connects as is admitted by `AllowUsers` afterwards (lock-out guards); Caddy's published ports are allowed by ufw; supported release. Fails with a message naming the variable, never its value. |
 | `hardening` | Packages; user `deploy` (password locked, key only, `authorized_keys` exclusively from `deploy_ssh_public_keys`); sshd drop-in `/etc/ssh/sshd_config.d/00-tocs-hardening.conf` (validated with `sshd -t` before it is installed and again before reload); fail2ban sshd jail (systemd backend); unattended-upgrades (security pockets only, no automatic reboot); network sysctls; ufw (default deny incoming, allow only 22/80/443). |
 | `docker` | Docker Engine + Compose v2 plugin from Docker's apt repository, key accepted only if its fingerprint is `9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`; `daemon.json` (log rotation, live-restore, no-new-privileges); adds `deploy` to the `docker` group. |
 | `app` | `/opt/tocs` layout (below), `.env` and `backup.env` rendered from variables, optional GHCR login for `deploy`, `tocs-backup.service` + `tocs-backup.timer` (daily 02:30 America/Los_Angeles). |
@@ -77,11 +77,13 @@ Secrets have **no defaults**; the play refuses to run without them. Everything e
 | `postgres_password`, `tocs_migrator_password`, `tocs_app_password` | **required, secret** | letters/digits, >= 16, all different. |
 | `backup_age_recipient` | **required** | `age1...` public key. Passing `backup_age_identity` or an `AGE-SECRET-KEY` fails the play. |
 | `site_address` / `app_base_url` | `register.to-cs.org` / `https://{{ site_address }}` | |
-| `http_port` / `https_port` | `80` / `443` | ufw allows only 80/443: change both or neither. |
+| `http_port` / `https_port` | `80` / `443` | preflight requires their port to be in `ufw_allowed_tcp_ports` (Docker publishes around ufw). |
+| `allow_connecting_user_not_in_allowusers` | `false` | `true` skips the "connecting account must be admin_user/deploy" lock-out guard. |
+| `preflight_require_admin_authorized_keys` | `true` | `false` skips the "admin_user has a non-empty authorized_keys" guard (certificates / AuthorizedKeysCommand). |
 | `mail_transport`, `trust_proxy`, `log_level`, `postgres_user`, `postgres_db` | `smtp`, `1`, `info`, `postgres`, `tocs` | as in `.env.prod.example` |
 | `backup_remote` | `""` | rclone destination for off-site copies. |
 | `backup_retention_days` | `14` | local retention (1..3650). |
-| `backup_rclone_config` | `""` | path of the rclone config (create it by hand, deploy-owned, 600). |
+| `backup_rclone_config` | `""` | path of the rclone config (create it by hand, deploy-owned, 600). The backup unit runs with `ProtectSystem=strict`; when this is set, its **directory** is added to `ReadWritePaths` so rclone can save refreshed OAuth tokens (so put it in a dedicated directory, e.g. `/opt/tocs/rclone/rclone.conf`, not directly in `/opt/tocs`). Empty = `~deploy/.config/rclone`, already writable for the unit. |
 | `backup_on_calendar` | `*-*-* 02:30:00 America/Los_Angeles` | systemd handles DST. |
 | `backup_randomized_delay` | `5min` | |
 | `backup_on_failure_unit` | `""` | optional `OnFailure=` unit (alerting you provide). |
@@ -107,8 +109,14 @@ and fail2ban. A mistake in `admin_user` or the keys means no SSH access. `prefli
    key) **before** closing the first. If it fails, fix it from the open session (`sudo rm
    /etc/ssh/sshd_config.d/00-tocs-hardening.conf && sudo systemctl reload ssh`, or `sudo ufw disable`).
 4. Repeated failed logins from your address are banned for 1 h by fail2ban (`sudo fail2ban-client unban <ip>`);
-   put a static admin address in `fail2ban_ignoreip`.
-5. Pin the host key in your `known_hosts` and in the `DEPLOY_KNOWN_HOSTS` GitHub secret (`ssh-keyscan -t ed25519`,
+   put a static admin address in `fail2ban_ignoreip`. **Offer exactly one key:** with `MaxAuthTries 3` and the
+   aggressive sshd filter, an ssh-agent holding many keys burns the attempts on wrong keys, gets refused and, after
+   a few connections, banned. Use `ssh -o IdentitiesOnly=yes -i ~/.ssh/<admin key>` (or `IdentitiesOnly yes` +
+   `IdentityFile` in `~/.ssh/config`, and `ansible_ssh_private_key_file` in the inventory).
+5. Connect as `admin_user` itself. `preflight` refuses to run when the connecting account (`ansible_user`, else the
+   account sudo was invoked from, else the remote user) is not `admin_user` or `deploy`, because it could not log
+   in again. Opt out only deliberately: `allow_connecting_user_not_in_allowusers: true`.
+6. Pin the host key in your `known_hosts` and in the `DEPLOY_KNOWN_HOSTS` GitHub secret (`ssh-keyscan -t ed25519`,
    checked against the console fingerprint).
 
 ## First deploy (after the play)
@@ -146,10 +154,13 @@ in the GitHub `production` environment, `AllowUsers` limits SSH to two accounts.
 but is out of scope (port 80/443 binding, systemd user services, backup/restore paths). Treat the deploy key like
 a root credential.
 
-**deploy owns `/opt/tocs`.** The scripts are `root:deploy 750`, so deploy cannot edit them in place, but since the
-directory is deploy-writable deploy could rename/replace them. This guards against accidents, not against a
-compromised deploy account (which is root-equivalent anyway). Nothing running as root executes files from
-`/opt/tocs` (the backup service runs as deploy). Re-running the play restores the scripts.
+**deploy owns `/opt/tocs` (known trade-off).** The scripts are `root:deploy 750`, so deploy cannot edit them in
+place, but because the directory itself belongs to deploy, deploy can rename, delete or replace them. A sticky bit
+(mode 1750) would **not** help: the sticky bit never restricts the directory's owner. Real protection would need a
+root-owned `/opt/tocs` with a deploy-owned state subdirectory for `previous_tag` / `current_tag` / `.deploy.lock`
+(a change to `deploy.sh`'s layout). It is not done because deploy is root-equivalent through the docker group
+anyway, so this only guards against accidents. Nothing running as root executes files from `/opt/tocs` (the backup
+service runs as deploy), and re-running the play restores the scripts.
 
 **Backups.** The host holds only the age recipient (public key): it can write backups but not read them. The
 identity (`AGE-SECRET-KEY-...`) stays offline (password manager / offline media), with at least two people able to
@@ -181,7 +192,9 @@ source is restricted with `Signed-By`, so only Docker's key can sign that reposi
 ## Tests
 
 `deploy/test/ansible-check.sh` (needs a local Docker engine and internet): ansible-lint (production profile) and
-`--syntax-check`; negative runs (empty `session_secret`, non-`age1` recipient, placeholder passwords) must fail in
+`--syntax-check`; negative runs (empty `session_secret`, non-`age1` recipient, placeholder passwords / `smtp_url` / `ghcr_token`,
+`admin_user` missing / root / deploy / without keys / with empty keys, connecting as a user outside `AllowUsers`,
+`http_port` not allowed by ufw) must fail in
 `preflight` with `changed=0` on an untouched host; a full apply against a throwaway privileged systemd Ubuntu 24.04
 container over SSH, with assertions on sshd (`sshd -T`, real logins: deploy/admin allowed, other users, root and
 passwords refused), ufw (active, only 22/80/443), file owners/modes, docker, fail2ban (a real ban), unattended

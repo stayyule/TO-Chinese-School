@@ -11,14 +11,14 @@ RUN apt-get update \
       iproute2 kmod \
  && rm -rf /var/lib/apt/lists/*
 
-# Admin user (the operator's account Ansible connects as) and a second user that must NOT be allowed to log in.
-RUN useradd -m -s /bin/bash opsadmin \
- && printf 'opsadmin ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/90-opsadmin \
- && chmod 440 /etc/sudoers.d/90-opsadmin \
- && useradd -m -s /bin/bash outsider \
- && install -d -m 700 -o opsadmin -g opsadmin /home/opsadmin/.ssh \
- && install -d -m 700 -o outsider -g outsider /home/outsider/.ssh \
- && usermod -p '*' opsadmin && usermod -p '*' outsider \
+# opsadmin: the operator's account Ansible connects as. outsider: must NOT be allowed to log in after hardening.
+# opsother: a second sudo user (negative test: connecting as a user that is not admin_user). nokeys / emptykeys:
+# candidate admin users without / with an empty authorized_keys (negative tests of the lock-out guard).
+RUN for u in opsadmin outsider opsother nokeys emptykeys; do useradd -m -s /bin/bash "$u" && usermod -p '*' "$u"; done \
+ && printf 'opsadmin ALL=(ALL) NOPASSWD:ALL\nopsother ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/90-ops \
+ && chmod 440 /etc/sudoers.d/90-ops \
+ && for u in opsadmin outsider opsother emptykeys; do install -d -m 700 -o "$u" -g "$u" "/home/$u/.ssh"; done \
+ && install -m 600 -o emptykeys -g emptykeys /dev/null /home/emptykeys/.ssh/authorized_keys \
  && rm -f /etc/systemd/system/multi-user.target.wants/systemd-resolved.service
 
 STOPSIGNAL SIGRTMIN+3

@@ -62,13 +62,21 @@
       key as backup_age_recipient and keep the identity offline.
     quiet: true
 
-- name: Check non-secret settings
+- name: Check admin_user
   ansible.builtin.assert:
     that:
       - admin_user is defined
       - admin_user is string
       - admin_user is match('^[a-z_][a-z0-9_-]{0,31}$')
       - admin_user not in ['root', deploy_user]
+    fail_msg: >-
+      admin_user must be set to the existing sudo account you log in with (lower-case Unix name), and must not be
+      root or {{ deploy_user }}: after this play sshd admits only {{ deploy_user }} and admin_user.
+    quiet: true
+
+- name: Check non-secret settings
+  ansible.builtin.assert:
+    that:
       - deploy_user is match('^[a-z_][a-z0-9_-]{0,31}$')
       - deploy_ssh_public_keys is defined
       - deploy_ssh_public_keys is sequence
@@ -98,19 +106,50 @@
       - (ghcr_username | default('') | length > 0) == (ghcr_token | default('') | length > 0)
       - 22 in (ufw_allowed_tcp_ports | map('int') | list)
     fail_msg: >-
-      Invalid settings: check admin_user (an existing sudo user, not root/deploy), deploy_ssh_public_keys (a list of
+      Invalid settings: check deploy_user, deploy_ssh_public_keys (a list of
       OpenSSH public keys), ghcr_owner (lower-case), image_tag (an immutable tag, not latest), site_address,
       app_base_url (https://...), caddy_tls, http_port/https_port, mail_transport, trust_proxy, log_level,
       postgres_user/postgres_db, backup_retention_days (1..3650), backup_remote, backup_rclone_config, and that
       ghcr_username and ghcr_token are either both set or both empty, and that ufw_allowed_tcp_ports keeps 22. See defaults/main.yml of each role and README.md.
     quiet: true
 
-- name: Check smtp_url is set when mail is delivered over SMTP
+# Docker publishes ports around ufw (README.md): whatever Caddy publishes must be a port ufw is meant to allow.
+- name: Check Caddy publishes only ports that ufw allows
   ansible.builtin.assert:
     that:
-      - mail_transport != 'smtp' or (smtp_url | default('') is match('^smtps?://[^\s\x27"]+$'))
-    fail_msg: smtp_url must be smtp://... or smtps://... (no quotes or spaces) when mail_transport is smtp.
+      - (http_port | string).split(':')[-1] | int in (ufw_allowed_tcp_ports | map('int') | list)
+      - (https_port | string).split(':')[-1] | int in (ufw_allowed_tcp_ports | map('int') | list)
+    fail_msg: >-
+      http_port and https_port must use ports listed in ufw_allowed_tcp_ports ({{ ufw_allowed_tcp_ports | join(', ') }};
+      normally exactly 80 and 443). Docker publishes ports around ufw, so any other port would be open to the
+      internet without a ufw rule.
     quiet: true
+
+- name: Check smtp_url is set when mail is delivered over SMTP (value never printed)
+  ansible.builtin.assert:
+    that:
+      - mail_transport != 'smtp' or (smtp_url | default('') is match('^smtps?://[^\s\x27"<>]+$'))
+    fail_msg: >-
+      smtp_url must be smtp://... or smtps://... (no quotes, spaces or angle brackets) when mail_transport is smtp.
+    quiet: true
+
+- name: Check smtp_url is not placeholder text (value never printed)
+  ansible.builtin.assert:
+    that:
+      - not (smtp_url | default('') | string | lower is search(preflight_placeholder_pattern))
+    fail_msg: >-
+      smtp_url looks like placeholder text (contains replace-with, changeme, placeholder, <...>): use the real SMTP
+      credentials.
+    quiet: true
+  when: mail_transport == 'smtp'
+
+- name: Check ghcr_token is not placeholder text (value never printed)
+  ansible.builtin.assert:
+    that:
+      - not (ghcr_token | string | lower is search(preflight_placeholder_pattern))
+    fail_msg: ghcr_token looks like placeholder text (contains replace-with, changeme, placeholder, <...>).
+    quiet: true
+  when: ghcr_token | default('') | length > 0
 
 - name: Look up admin_user on the host
   ansible.builtin.command:
@@ -145,3 +184,20 @@
       false if keys come from AuthorizedKeysCommand / certificates).
     quiet: true
   when: preflight_require_admin_authorized_keys | bool
+
+# The SSH login of THIS run: ansible_user when set (inventory / -e / -u), otherwise the account sudo was invoked
+# from (SUDO_USER, i.e. the SSH login when Ansible's default remote user is used; also the operator's account for
+# `connection: local` run with sudo on the host), otherwise the effective user (root when connected as root).
+- name: Check the account this play connects as is still admitted after hardening
+  ansible.builtin.assert:
+    that:
+      - preflight_connecting_user in [admin_user, deploy_user]
+    fail_msg: >-
+      This play connects as '{{ preflight_connecting_user }}', which is not in AllowUsers ({{ deploy_user }}
+      {{ admin_user }}): after hardening you could not log in as it again. Connect as admin_user (ansible_user =
+      admin_user), or set allow_connecting_user_not_in_allowusers: true if that is really intended.
+    quiet: true
+  vars:
+    preflight_connecting_user: >-
+      {{ ansible_user | default(ansible_facts['env']['SUDO_USER'] | default(ansible_facts['user_id'], true), true) }}
+  when: not (allow_connecting_user_not_in_allowusers | bool)

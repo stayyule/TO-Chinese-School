@@ -7,5 +7,10 @@ preflight_supported_releases: ["24.04"]
 # false only when admin_user authenticates through another mechanism (AuthorizedKeysCommand, certificates).
 preflight_require_admin_authorized_keys: true
 
-# Lower-cased substrings that mark a value as an unfilled placeholder (checked for every secret).
+# Refuse to run when the account this play connects as (ansible_user, else SUDO_USER, else the effective remote
+# user) is neither admin_user nor deploy_user: AllowUsers would not admit it afterwards. Opt out only deliberately.
+allow_connecting_user_not_in_allowusers: false
+
+# Lower-cased substrings that mark a value as an unfilled placeholder (checked for every secret, smtp_url and,
+# when set, ghcr_token).
 preflight_placeholder_pattern: "replace-with|replacewith|replace_with|changeme|change-me|change_me|placeholder|xxxxxxxx|<.*>"

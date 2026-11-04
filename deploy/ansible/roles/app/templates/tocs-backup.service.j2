@@ -30,6 +30,10 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths={{ tocs_backup_dir }}
 ReadWritePaths=-{{ deploy_home }}/.docker -{{ deploy_home }}/.cache/rclone -{{ deploy_home }}/.config/rclone
+{% if backup_rclone_config %}
+# rclone rewrites its config (OAuth token refresh) via a temporary file next to it: its directory must be writable.
+ReadWritePaths=-{{ backup_rclone_config | dirname }}
+{% endif %}
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes

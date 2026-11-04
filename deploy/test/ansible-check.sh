@@ -82,7 +82,7 @@ playbook() {
   local log="$WORK/$1.log"
   shift
   RC=0
-  ctl ansible-playbook -i /work/inventory.ini /repo/deploy/ansible/site.yml -e @/work/vars.yml "$@" >"$log" 2>&1 || RC=$?
+  ctl ansible-playbook -i /work/inventory.ini /repo/deploy/ansible/site.yml -e "@/work/${VARS_FILE:-vars.yml}" "$@" >"$log" 2>&1 || RC=$?
 }
 recap() { grep -E "^$INV_HOST +:" "$WORK/$1.log" | tail -n1 || true; }
 changed_count() { recap "$1" | sed -nE 's/.* changed=([0-9]+).*/\1/p'; }
@@ -178,6 +178,18 @@ json.dump({"session_secret": ""}, open("/work/bad-session.yml", "w"))
 json.dump({"backup_age_recipient": "ssh-ed25519-not-an-age-key"}, open("/work/bad-recipient.yml", "w"))
 json.dump({"postgres_password": "replacewithagenuinepassword1234567"}, open("/work/bad-placeholder.yml", "w"))
 json.dump({"postgres_password": "changemechangemechangeme12"}, open("/work/bad-changeme.yml", "w"))
+json.dump({"smtp_url": "smtps://<user>:<password>@<smtp-host>:465"}, open("/work/bad-smtp-brackets.yml", "w"))
+json.dump({"smtp_url": "smtps://mailer:changeme@smtp.tocs-test.invalid:465"}, open("/work/bad-smtp-changeme.yml", "w"))
+json.dump({"ghcr_username": "tocs-bot", "ghcr_token": "replace-with-a-read-packages-token"}, open("/work/bad-ghcr-token.yml", "w"))
+json.dump({"ansible_user": "opsother"}, open("/work/bad-connecting-user.yml", "w"))
+json.dump({"admin_user": "root"}, open("/work/bad-admin-root.yml", "w"))
+json.dump({"admin_user": "deploy"}, open("/work/bad-admin-deploy.yml", "w"))
+json.dump({"admin_user": "nokeys"}, open("/work/bad-admin-nokeys.yml", "w"))
+json.dump({"admin_user": "emptykeys"}, open("/work/bad-admin-emptykeys.yml", "w"))
+json.dump({"http_port": "8081"}, open("/work/bad-http-port.yml", "w"))
+noadmin = dict(v)
+del noadmin["admin_user"]
+json.dump(noadmin, open("/work/vars-noadmin.yml", "w"), indent=2)
 PY
   # Hand the files to the user running this script (modes stay 600/700).
   chown -R '"$(id -u):$(id -g)"' /work
@@ -190,8 +202,9 @@ fi
 
 docker cp "$WORK/keys/admin.pub" "$HOST:/home/opsadmin/.ssh/authorized_keys"
 docker cp "$WORK/keys/admin.pub" "$HOST:/home/outsider/.ssh/authorized_keys"
+docker cp "$WORK/keys/admin.pub" "$HOST:/home/opsother/.ssh/authorized_keys"
 hx 'install -d -m 700 /root/.ssh && cp /home/opsadmin/.ssh/authorized_keys /root/.ssh/authorized_keys &&
-    chown opsadmin:opsadmin /home/opsadmin/.ssh/authorized_keys && chown outsider:outsider /home/outsider/.ssh/authorized_keys &&
+    for u in opsadmin outsider opsother; do chown $u:$u /home/$u/.ssh/authorized_keys; done &&
     chmod 600 /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys'
 cat >"$WORK/inventory.ini" <<EOF
 [tocs]
@@ -222,6 +235,18 @@ neg session_secret bad-session.yml "session_secret must be"
 neg backup_age_recipient bad-recipient.yml "backup_age_recipient must be"
 neg placeholder_password bad-placeholder.yml "postgres_password looks like placeholder text"
 neg changeme_password bad-changeme.yml "postgres_password looks like placeholder text"
+neg smtp_url_angle_brackets bad-smtp-brackets.yml "smtp_url must be"
+neg smtp_url_changeme bad-smtp-changeme.yml "smtp_url looks like placeholder text"
+neg ghcr_token_placeholder bad-ghcr-token.yml "ghcr_token looks like placeholder text"
+neg connecting_user_not_allowed bad-connecting-user.yml "is not in AllowUsers"
+neg admin_user_root bad-admin-root.yml "admin_user must be"
+neg admin_user_deploy bad-admin-deploy.yml "admin_user must be"
+neg admin_user_without_keys bad-admin-nokeys.yml "has no (or an empty) ~/.ssh/authorized_keys"
+neg admin_user_empty_keys bad-admin-emptykeys.yml "has no (or an empty) ~/.ssh/authorized_keys"
+neg http_port_not_allowed bad-http-port.yml "http_port and https_port must"
+# admin_user missing entirely: a base vars file without it (an -e override cannot unset a variable).
+printf '{}\n' >"$WORK/empty.yml"
+VARS_FILE=vars-noadmin.yml neg admin_user_missing empty.yml "admin_user must be"
 check "host unchanged after negative runs (no deploy user, no /opt/tocs, no sshd drop-in, ufw not installed)" \
   '! id deploy && [ ! -e /opt/tocs ] && [ ! -e /etc/ssh/sshd_config.d/00-tocs-hardening.conf ] && ! command -v ufw'
 
