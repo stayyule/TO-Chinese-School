@@ -1,0 +1,15 @@
+title = "TOCS gitleaks config"
+
+[extend]
+useDefault = true
+
+# Only known, reviewed false positives / legacy material is allowlisted; everything else (including new code under
+# backend/, frontend/, deploy/) is scanned with the default ruleset.
+[allowlist]
+description = "Legacy Rails apps (being replaced), legacy vendored fixtures, and one backend test (CSRF cookie header built from a per-run random token)"
+paths = [
+  '''^chineseschool/''',
+  '''^chineseschool-rails2\.3\.12/''',
+  '''^data-export/''',
+  '''^backend/test/auth-login\.int-spec\.ts$''',
+]
