@@ -363,6 +363,29 @@ describe('auth: login, sessions, CSRF, throttling (app connected as tocs_app)', 
     expect((await protectedGet(sid)).status).toBe(401);
   });
 
+  it("sweeps the user's expired and idle-expired sessions on login, keeping live ones and other users' rows", async () => {
+    const bob = await admin.user.create({ data: { username: 'bob' } });
+    const row = (tokenHash: string, userId: number, lastSeenAgoMs: number, expiresInMs: number) => ({
+      tokenHash,
+      userId,
+      createdAt: new Date(T0.getTime() - 24 * HOUR),
+      lastSeenAt: new Date(T0.getTime() - lastSeenAgoMs),
+      expiresAt: new Date(T0.getTime() + expiresInMs),
+    });
+    await admin.session.createMany({
+      data: [
+        row('a-expired', aliceId, HOUR, 0), // absolute lifetime reached (expires_at = now)
+        row('a-idle', aliceId, 8 * HOUR + 1000, 24 * HOUR), // idle 8 h + 1 s
+        row('a-live', aliceId, HOUR, 24 * HOUR),
+        row('b-expired', bob.id, HOUR, -HOUR), // another user's: not this login's business
+      ],
+    });
+    await loginOk('alice', 'Pa55word!x', newIp());
+    const left = (await admin.session.findMany({ orderBy: { id: 'asc' } })).map((s) => s.tokenHash);
+    expect(left.slice(0, 2)).toEqual(['a-live', 'b-expired']);
+    expect(left).toHaveLength(3); // + the new session
+  });
+
   it('treats a missing, malformed or unknown session cookie as unauthenticated', async () => {
     expect((await http().get('/api/v1/test-protected')).status).toBe(401);
     expect((await protectedGet('garbage')).status).toBe(401);

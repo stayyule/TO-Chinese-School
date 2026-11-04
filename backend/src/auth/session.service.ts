@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { Clock } from '../common/clock';
+import { logger } from '../common/logger';
 import { PrismaService } from '../prisma/prisma.service';
 
 export const SESSION_IDLE_MS = 8 * 3_600_000;
@@ -24,6 +25,7 @@ export class SessionService {
     const id = randomBytes(32).toString('base64url');
     const now = this.clock.now();
     const expiresAt = new Date(now.getTime() + SESSION_ABSOLUTE_MS);
+    await this.sweepExpiredForUser(userId, now);
     await this.prisma.session.create({
       data: {
         tokenHash: hashId(id),
@@ -36,6 +38,24 @@ export class SessionService {
       },
     });
     return { id, expiresAt };
+  }
+
+  /**
+   * Best-effort cleanup of the user's dead rows (absolute lifetime reached or idle too long; same rules as
+   * resolve), so sessions that are never presented again do not pile up. Failures are logged, never thrown:
+   * a sweep must not block a login.
+   */
+  private async sweepExpiredForUser(userId: number, now: Date): Promise<void> {
+    try {
+      await this.prisma.session.deleteMany({
+        where: {
+          userId,
+          OR: [{ expiresAt: { lte: now } }, { lastSeenAt: { lt: new Date(now.getTime() - SESSION_IDLE_MS) } }],
+        },
+      });
+    } catch (err) {
+      logger.warn({ errName: err instanceof Error ? err.name : typeof err }, 'expired-session sweep failed');
+    }
   }
 
   /**

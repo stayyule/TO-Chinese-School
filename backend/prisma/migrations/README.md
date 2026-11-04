@@ -3,7 +3,9 @@
 There is deliberately **no `0_init` migration**. The 29 baseline tables already exist in the
 production database (created by the legacy Rails app), so Prisma migrations here are
 **additive only** on top of them: `*_foundation` adds `sessions`, `auth_tokens`, `permissions`,
-`role_permissions`, `audit_logs` and `users.password_hash_v2`. Never recreate, drop, rename or
+`role_permissions`, `audit_logs` and `users.password_hash_v2`; `*_auth_indexes` adds the indexes the auth hot
+paths need (login-failure counts and phone-check limits on `audit_logs`, `sessions.user_id`, and
+`auth_tokens (person_id, purpose, used_at)`). Never recreate, drop, rename or
 truncate baseline objects (`node scripts/check-migrations.mjs backend/prisma/migrations` enforces this).
 
 `backend/db/baseline.sql` is only a stand-in for production when building dev/test databases.
@@ -24,7 +26,7 @@ truncate baseline objects (`node scripts/check-migrations.mjs backend/prisma/mig
 
 The database already has the baseline: run steps 3 and 4 only (step 3's SQL pre-creates an empty
 `_prisma_migrations` so Prisma does not refuse with P3005 on a non-empty database; `migrate deploy`
-then applies only the foundation migration and later ones). Roles come from `init-roles.sql` run by a DBA
+then applies only the foundation migration and later ones, currently `*_auth_indexes`). Roles come from `init-roles.sql` run by a DBA
 with production passwords supplied via `PGOPTIONS="-c tocs.migrator_password=... -c tocs.app_password=..."`.
 
 With `deploy/compose.prod.yml`, the one-shot `migrate` service (`deploy/migrate.sh`, image
@@ -49,4 +51,4 @@ Only ever use `migrate reset`, `db push` or `migrate dev` against `tocs_dev` / `
   role exists), so the table is append-only even before `grants.sql` runs.
 - `node scripts/verify-migrate-deploy.mjs` exercises the production path for real in scratch DB
   `tocs_migrate_test`: baseline + roles + empty `_prisma_migrations`, `prisma migrate deploy` as `tocs_migrator`
-  (twice), then grants.
+  (twice; asserts every migration directory is recorded exactly once), then grants.

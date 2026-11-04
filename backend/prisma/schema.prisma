@@ -571,6 +571,7 @@ model Session {
   ip         String?
   userAgent  String?  @map("user_agent")
 
+  @@index([userId])
   @@map("sessions")
 }
 
@@ -583,6 +584,7 @@ model AuthToken {
   usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  @@index([personId, purpose, usedAt])
   @@map("auth_tokens")
 }
 
@@ -613,5 +615,8 @@ model AuditLog {
   ip            String?
   meta          Json     @default("{}")
 
+  @@index([actorUsername, action, id])
+  @@index([targetType, targetId, action])
+  @@index([actorUserId, action, id])
   @@map("audit_logs")
 }

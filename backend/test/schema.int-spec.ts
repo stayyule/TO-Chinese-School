@@ -83,4 +83,30 @@ describe('prisma schema', () => {
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.is_nullable === 'NO')).toBe(true);
   });
+
+  it('has the auth hot-path indexes, declared both in the database and as @@index in schema.prisma', async () => {
+    const expected: Record<string, string> = {
+      audit_logs_actor_username_action_id_idx: 'audit_logs (actor_username, action, id)',
+      audit_logs_target_type_target_id_action_idx: 'audit_logs (target_type, target_id, action)',
+      audit_logs_actor_user_id_action_id_idx: 'audit_logs (actor_user_id, action, id)',
+      sessions_user_id_idx: 'sessions (user_id)',
+      auth_tokens_person_id_purpose_used_at_idx: 'auth_tokens (person_id, purpose, used_at)',
+    };
+    const { rows } = await pg.query<{ indexname: string; indexdef: string }>(
+      "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
+      [Object.keys(expected)],
+    );
+    const actual = Object.fromEntries(
+      rows.map((r) => [r.indexname, r.indexdef.replace(/^CREATE INDEX \S+ ON public\.(\w+) USING btree /, '$1 ')]),
+    );
+    expect(actual).toEqual(expected);
+    const declared = (model: string) => models.find((m) => m.name === model)?.body.match(/@@index\(\[[^\]]*\]\)/g);
+    expect(declared('AuditLog')).toEqual([
+      '@@index([actorUsername, action, id])',
+      '@@index([targetType, targetId, action])',
+      '@@index([actorUserId, action, id])',
+    ]);
+    expect(declared('Session')).toEqual(['@@index([userId])']);
+    expect(declared('AuthToken')).toEqual(['@@index([personId, purpose, usedAt])']);
+  });
 });
