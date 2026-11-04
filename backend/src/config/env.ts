@@ -1,4 +1,41 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
+
+/**
+ * Default Express 'trust proxy': Caddy reaches the app over loopback or a private (Docker) network. Production
+ * Compose narrows it with TRUST_PROXY=1 (Caddy is the only hop). The app port must never be internet-reachable.
+ */
+export const DEFAULT_TRUST_PROXY = 'loopback, linklocal, uniquelocal';
+const PROXY_NAMES = new Set(['loopback', 'linklocal', 'uniquelocal']);
+
+const isProxyEntry = (entry: string): boolean => {
+  if (PROXY_NAMES.has(entry)) return true;
+  const [addr, prefix, ...rest] = entry.split('/');
+  if (rest.length > 0 || !isIP(addr)) return false;
+  if (prefix === undefined) return true;
+  if (/^\d{1,3}$/.test(prefix)) return Number(prefix) <= (isIP(addr) === 4 ? 32 : 128);
+  return isIP(prefix) === 4 && isIP(addr) === 4; // IPv4 netmask form, e.g. 10.0.0.0/255.0.0.0
+};
+
+/**
+ * Express 'trust proxy' value from TRUST_PROXY (whose X-Forwarded-For is believed for req.ip: per-IP throttling,
+ * audit ip). Empty/unset -> DEFAULT_TRUST_PROXY; a non-negative integer -> hop count (1 = only the nearest proxy,
+ * i.e. Caddy); otherwise a comma list of IPs, CIDR subnets or the names loopback/linklocal/uniquelocal.
+ * `true` (trust every hop, so any client can spoof its address) and `false` are rejected.
+ */
+export function parseTrustProxy(raw: string | undefined): number | string {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_TRUST_PROXY;
+  if (/^\d+$/.test(value)) return Number(value);
+  const entries = value.split(',').map((e) => e.trim());
+  const bad = entries.filter((e) => !isProxyEntry(e));
+  if (bad.length > 0) {
+    throw new Error(
+      `TRUST_PROXY must be a hop count or a comma list of IPs/subnets/loopback/linklocal/uniquelocal (got ${bad.map((b) => JSON.stringify(b)).join(', ')})`,
+    );
+  }
+  return entries.join(', ');
+}
 
 const baseSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -8,6 +45,16 @@ const baseSchema = z.object({
   SMTP_URL: z.string().optional(),
   MAIL_TRANSPORT: z.enum(['smtp', 'memory']).default('smtp'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  TRUST_PROXY: z
+    .string()
+    .optional()
+    .superRefine((v, ctx) => {
+      try {
+        parseTrustProxy(v);
+      } catch (e) {
+        ctx.addIssue({ code: 'custom', message: (e as Error).message });
+      }
+    }),
 });
 
 /** SMTP_URL is required only when MAIL_TRANSPORT=smtp (the default). */

@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { MailModule } from '../mail/mail.module';
-import { loadEnv, loadMailConfig } from './env';
+import { DEFAULT_TRUST_PROXY, loadEnv, loadMailConfig, parseTrustProxy } from './env';
 
 const valid = {
   DATABASE_URL: 'postgres://a@localhost/db',
@@ -34,6 +34,36 @@ describe('loadEnv', () => {
   it('does not require SMTP_URL when MAIL_TRANSPORT is memory', () => {
     const noSmtp = { ...valid, SMTP_URL: undefined };
     expect(loadEnv({ ...noSmtp, MAIL_TRANSPORT: 'memory' }).MAIL_TRANSPORT).toBe('memory');
+  });
+});
+
+describe('parseTrustProxy / TRUST_PROXY', () => {
+  it('defaults to loopback, linklocal, uniquelocal when unset or blank', () => {
+    expect(parseTrustProxy(undefined)).toBe(DEFAULT_TRUST_PROXY);
+    expect(parseTrustProxy('  ')).toBe(DEFAULT_TRUST_PROXY);
+    expect(DEFAULT_TRUST_PROXY).toBe('loopback, linklocal, uniquelocal');
+  });
+
+  it('turns an integer into a hop count', () => {
+    expect(parseTrustProxy('1')).toBe(1);
+    expect(parseTrustProxy(' 0 ')).toBe(0);
+  });
+
+  it('accepts a list of IPs, CIDR subnets and proxy-addr names', () => {
+    expect(parseTrustProxy('172.30.0.0/16,loopback')).toBe('172.30.0.0/16, loopback');
+    expect(parseTrustProxy('10.0.0.1, fd00::/8, 10.0.0.0/255.0.0.0')).toBe('10.0.0.1, fd00::/8, 10.0.0.0/255.0.0.0');
+  });
+
+  it('rejects true/false and malformed entries', () => {
+    for (const bad of ['true', 'false', 'TRUE', '1.2.3', '10.0.0.0/33', 'fd00::/129', 'nope', '10.0.0.0/8/1', '1,']) {
+      expect(() => parseTrustProxy(bad)).toThrow(/TRUST_PROXY/);
+    }
+  });
+
+  it('loadEnv validates TRUST_PROXY and leaves the raw value', () => {
+    expect(loadEnv({ ...valid, TRUST_PROXY: '1' }).TRUST_PROXY).toBe('1');
+    expect(loadEnv(valid).TRUST_PROXY).toBeUndefined();
+    expect(() => loadEnv({ ...valid, TRUST_PROXY: 'true' })).toThrow(/TRUST_PROXY/);
   });
 });
 
