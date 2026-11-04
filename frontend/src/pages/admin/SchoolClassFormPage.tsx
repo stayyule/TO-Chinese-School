@@ -45,7 +45,8 @@ function initialValues(c: SchoolClass | null): Partial<ClassValues> {
   }
 }
 
-function requestBody(v: ClassValues) {
+/** `withGrade`: whether the grade field was rendered; when it was not, gradeId is omitted so PATCH keeps the stored grade. */
+function requestBody(v: ClassValues, withGrade: boolean) {
   return {
     englishName: v.englishName.trim(),
     chineseName: v.chineseName.trim(),
@@ -56,7 +57,7 @@ function requestBody(v: ClassValues) {
     maxSize: v.maxSize,
     minAge: v.minAge ?? null,
     maxAge: v.maxAge ?? null,
-    gradeId: v.gradeId ?? null,
+    ...(withGrade ? { gradeId: v.gradeId ?? null } : {}),
   }
 }
 
@@ -67,10 +68,15 @@ function SchoolClassForm({ cls }: { cls: SchoolClass | null }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { can } = useMe()
-  const grades = useGrades(can('grades.read'))
+  const showGrade = can('grades.read')
+  const grades = useGrades(showGrade)
   const { busy, error, notFound, submit } = useFormSubmit(
     form,
-    (v) => apiJson(cls ? `/school-classes/${cls.id}` : '/school-classes', { method: cls ? 'PATCH' : 'POST', body: JSON.stringify(requestBody(v)) }),
+    (v) =>
+      apiJson(cls ? `/school-classes/${cls.id}` : '/school-classes', {
+        method: cls ? 'PATCH' : 'POST',
+        body: JSON.stringify(requestBody(v, showGrade)),
+      }),
     {
       targets: { NAME_TAKEN: { field: ['englishName'], key: 'classes.nameTaken' } },
       onSuccess: async () => {
@@ -112,7 +118,7 @@ function SchoolClassForm({ cls }: { cls: SchoolClass | null }) {
         <Form.Item name="maxAge" label={t('classes.maxAge')} rules={ageRules}>
           <InputNumber precision={0} controls={false} style={{ width: '100%' }} />
         </Form.Item>
-        {can('grades.read') && (
+        {showGrade && (
           <Form.Item name="gradeId" label={t('classes.grade')}>
             <Select
               allowClear

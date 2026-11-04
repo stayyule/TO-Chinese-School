@@ -346,11 +346,11 @@ describe('school classes', () => {
     expect(await screen.findByText('A class with that name already exists')).toBeInTheDocument()
   })
 
-  it('edits a class from the list data and PATCHes with Chinese preserved', async () => {
+  it('edits a class from the list data and PATCHes with Chinese preserved; without grades.read gradeId is not sent', async () => {
     mockMe(['school_classes.read', 'school_classes.edit'])
     let body: Record<string, unknown> | undefined
     server.use(
-      http.get('/api/v1/school-classes', () => HttpResponse.json([cls])),
+      http.get('/api/v1/school-classes', () => HttpResponse.json([{ ...cls, gradeId: 4 }])),
       csrf,
       http.patch('/api/v1/school-classes/1', async ({ request }) => {
         body = (await request.json()) as Record<string, unknown>
@@ -364,7 +364,33 @@ describe('school classes', () => {
     await user.type(screen.getByLabelText('English name'), 'Grade One')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/admin/school-classes'))
-    expect(body).toMatchObject({ englishName: 'Grade One', chineseName: '一年级', schoolClassType: 'S', maxSize: 25, minAge: null, gradeId: null })
+    expect(body).toMatchObject({ englishName: 'Grade One', chineseName: '一年级', schoolClassType: 'S', maxSize: 25, minAge: null })
+    expect(screen.queryByLabelText('Grade')).not.toBeInTheDocument()
+    expect(body).not.toHaveProperty('gradeId') // the hidden field must not clear the stored grade
+  })
+
+  it('with grades.read, clearing the grade PATCHes gradeId: null', async () => {
+    mockMe(['school_classes.read', 'school_classes.edit', 'grades.read'])
+    let body: Record<string, unknown> | undefined
+    server.use(
+      http.get('/api/v1/school-classes', () => HttpResponse.json([{ ...cls, gradeId: 4 }])),
+      http.get('/api/v1/grades', () => HttpResponse.json([{ id: 4, englishName: 'First Grade', chineseName: '一年级', shortName: 'G1' }])),
+      csrf,
+      http.patch('/api/v1/school-classes/1', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(cls)
+      }),
+    )
+    const router = renderApp('/admin/school-classes/1/edit')
+    const user = userEvent.setup()
+    expect(await screen.findByTitle('First Grade')).toBeInTheDocument()
+    const clear = document.querySelector('.ant-select-clear')
+    expect(clear).not.toBeNull()
+    await user.click(clear as Element)
+    await waitFor(() => expect(screen.queryByTitle('First Grade')).not.toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/school-classes'))
+    expect(body).toMatchObject({ englishName: 'Grade 1', gradeId: null })
   })
 
   it('shows Not found for an unknown class id', async () => {
