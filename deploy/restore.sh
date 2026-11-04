@@ -3,11 +3,15 @@
 #
 #   restore.sh [--force] <artifact.dump.age> <database-url>
 #
-# <database-url> is postgresql://[user[:password]@]host[:port]/dbname[?params]; the database name is REQUIRED (a URL
-# without one is refused, so a restore can never silently land in a default database) and the database must already
-# exist. The password belongs in the userinfo part (percent-encoded) or in PGPASSWORD / PGPASSFILE; `password=` as a
-# query parameter is refused. The password is never printed and never put on a command line (it is handed to libpq
-# through PGPASSWORD); messages show the URL without it.
+# <database-url> is postgresql://[user@]host[:port]/dbname[?params]; the database name is REQUIRED (a URL without one
+# is refused, so a restore can never silently land in a default database) and the database must already exist.
+# Query parameters: only sslmode, sslrootcert, sslcert, sslkey, connect_timeout, application_name (each once, literal
+# lower-case keys). Anything else (dbname=, host=, port=, user=, options=, service=, passfile=, password=, ...) is
+# refused, because libpq would let it override the database / server named in the URL.
+# PASSWORD: preferred is PGPASSWORD or a PGPASSFILE (~/.pgpass, mode 600) in the environment. `user:password@` in the
+# URL is accepted but LEAST preferred: the URL is an argument of this script, so the password is visible in `ps` /
+# /proc/<pid>/cmdline and in shell history while it runs. This script itself never prints the password and never
+# passes it on to child command lines (it is handed to libpq through PGPASSWORD); messages show the URL without it.
 #
 # Steps: verify <artifact>.sha256 when it exists next to the artifact -> decrypt with the age identity into a private
 # temporary directory (mode 700; removed on exit, also on failure) -> check the archive with `pg_restore --list` ->
@@ -21,7 +25,8 @@
 # backup are left alone). --clean is never used without force.
 #
 # Environment:
-#   BACKUP_AGE_IDENTITY_FILE  required, age identity (private key) file.
+#   BACKUP_AGE_IDENTITY_FILE  required, age identity (private key) file. It must NOT live on the production host;
+#                             a warning is printed when it is readable by group/others.
 #   RESTORE_FORCE             1 = same as --force (default 0).
 #   RESTORE_NO_OWNER          1 = add --no-owner --no-privileges (restore into a server without the tocs roles).
 #   RESTORE_TMPDIR            where the decrypted dump is staged (default $TMPDIR or /tmp). It holds plaintext
@@ -74,9 +79,32 @@ USERINFO=${BASH_REMATCH[3]}
 HOSTPORT=${BASH_REMATCH[4]}
 DBNAME=${BASH_REMATCH[5]}
 QUERY=${BASH_REMATCH[6]}
-PW_QUERY_RE='[?&]password='
-if [[ $QUERY =~ $PW_QUERY_RE ]]; then
-  die 2 "pass the password in the URL userinfo or PGPASSWORD, not as a query parameter"
+# Query parameters: libpq lets dbname=, host=, hostaddr=, port=, user=, service=, options=, passfile=, ... in the
+# query override the URL's path / authority, so the database actually restored into could differ from the one
+# shown. Only a fixed allowlist of transport settings is accepted: lower-case literal keys (no percent-encoding:
+# libpq decodes keys, so `%64bname` would be dbname), each at most once, no empty parameters. Rebuilt from the
+# checked parameters only.
+QUERY_ALLOWED=" sslmode sslrootcert sslcert sslkey connect_timeout application_name "
+CLEAN_QUERY=""
+SEEN_KEYS=" "
+if [ -n "$QUERY" ]; then
+  IFS='&' read -r -a PARAMS <<<"${QUERY#\?}"
+  [ "${#PARAMS[@]}" -gt 0 ] || die 2 "empty query string in the database URL"
+  # read -a drops a trailing empty field; catch `...&` and `?` explicitly
+  case "$QUERY" in *'&' | '?') die 2 "empty query parameter in the database URL" ;; esac
+  for param in "${PARAMS[@]}"; do
+    key=${param%%=*}
+    lower=${key,,}
+    if [ "$lower" = password ] || [[ $lower == *%* ]]; then
+      die 2 "pass the password in PGPASSWORD / PGPASSFILE (or the URL userinfo), never as a query parameter; percent-encoded query keys are refused"
+    fi
+    if [ -z "$param" ] || [[ $param != *=* ]] || ! [[ $key =~ ^[a-z_]+$ ]] || [[ $QUERY_ALLOWED != *" $key "* ]]; then
+      die 2 "database URL query parameter not allowed (allowed: sslmode, sslrootcert, sslcert, sslkey, connect_timeout, application_name; never dbname/host/port/user/options/service/passfile/...)"
+    fi
+    [[ $SEEN_KEYS != *" $key "* ]] || die 2 "database URL query parameter '$key' given more than once"
+    SEEN_KEYS+="$key "
+    CLEAN_QUERY+="${CLEAN_QUERY:+&}$param"
+  done
 fi
 url_decode() { # percent-decoding only ('+' stays '+'); backslashes are protected from printf %b
   local s=${1//\\/\\\\}
@@ -87,8 +115,15 @@ if [[ $USERINFO == *:* ]]; then
   PGPASSWORD="$(url_decode "${USERINFO#*:}")"
   export PGPASSWORD
 fi
-CONN="postgresql://${DB_USER:+$DB_USER@}${HOSTPORT}/${DBNAME}${QUERY}" # no password
-SHOWN="postgresql://${DB_USER:+$DB_USER@}${HOSTPORT}/${DBNAME}"
+CONN="postgresql://${DB_USER:+$DB_USER@}${HOSTPORT}/${DBNAME}${CLEAN_QUERY:+?$CLEAN_QUERY}" # no password
+# Shown with user and database name decoded, i.e. as libpq will use them.
+SHOWN="postgresql://${DB_USER:+$(url_decode "$DB_USER")@}${HOSTPORT}/$(url_decode "$DBNAME")"
+
+# An identity readable by group/others is a leak waiting to happen: warn (not fatal: restores are often urgent).
+ID_MODE="$(stat -c %a "$IDENTITY" 2>/dev/null || echo 0)"
+if [ $((8#$ID_MODE & 8#077)) -ne 0 ]; then
+  log "WARNING: identity file is accessible by group/others (mode $ID_MODE); chmod 600 it (or keep it on removable / offline media)"
+fi
 
 # --- integrity, decryption, archive check (before touching the target)
 if [ -f "$ARTIFACT.sha256" ]; then

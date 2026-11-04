@@ -5,16 +5,24 @@
 #
 # <image-tag> must match ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ (Docker's tag grammar); anything else is rejected
 # before any step runs. Steps:
-#   1. backup.sh <backup dir>            abort (exit 3, nothing changed) if the backup fails
-#   2. record the running tag            -> <app dir>/previous_tag, BEFORE anything changes. Source, in order: the
-#                                           image tag of the running api container, <app dir>/current_tag, IMAGE_TAG
-#                                           in the env file.
+#   1. backup.sh <backup dir>            abort (exit 3, nothing changed) if the backup fails. This includes backup exit
+#                                           4 (local artifact written but the off-site BACKUP_REMOTE upload failed):
+#                                           by design (fail-safe) no deploy goes ahead without an off-site copy when
+#                                           one is configured. Fix the remote, or deploy with BACKUP_REMOTE= explicitly.
+#   2. record the rollback target        -> <app dir>/previous_tag, BEFORE anything changes. Source, in order:
+#                                           <app dir>/current_tag (last tag that passed this script's health check),
+#                                           the image tag of the running api container, IMAGE_TAG in the env file. If
+#                                           the running tag differs from current_tag (broken state, e.g. after an
+#                                           exit-4 failed rollback), a loud WARNING is logged and current_tag wins.
 #   3. docker compose pull               images of the new tag (deploy services + migrate)
 #   4. docker compose run --rm migrate   the one-shot migration of the NEW tag, before any app container changes
 #   5. docker compose up -d --no-deps --wait <services>     (default: api caddy)
 #   6. poll the health URL for up to DEPLOY_HEALTH_TIMEOUT (60) seconds
 #   7. any failure in 3-6: `up -d --no-deps --wait` with the previous tag, health check again, exit 1 (or 4 if the
 #      rollback itself fails). On success <app dir>/current_tag holds the running tag.
+# The workflow's later smoke check over the public URL (deploy.yml) does NOT roll back: by then this script has
+# already verified health on the host. A failing smoke check (DNS, firewall, CDN, certificate) is reported as a failed
+# workflow run for a human to investigate; roll back manually by deploying the previous tag (cat previous_tag).
 # The tag is selected only through the IMAGE_TAG environment variable, which overrides the env file for compose
 # interpolation; the env file (secrets) is never edited. Because .env keeps its original IMAGE_TAG, run manual compose
 # commands as: IMAGE_TAG="$(cat /opt/tocs/current_tag)" docker compose -p tocs --env-file .env -f compose.prod.yml ...
@@ -177,12 +185,26 @@ if ! ARTIFACT="$(bash "$BACKUP_SCRIPT" "$BACKUP_DIR")"; then
 fi
 log "backup written: $ARTIFACT"
 
-# 2. record the running tag before anything changes
-PREV_TAG="$(running_tag)"
-PREV_SOURCE="running $API_SERVICE container"
-if [ -z "$PREV_TAG" ] && [ -s "$APP_DIR/current_tag" ]; then
-  PREV_TAG="$(head -n1 "$APP_DIR/current_tag")"
-  PREV_SOURCE="current_tag file"
+# 2. record the rollback target before anything changes: current_tag (last tag that passed this script's health
+# check) wins over the running container's tag; they differ only after a broken state (e.g. a failed rollback).
+RUNNING_TAG="$(running_tag)"
+KNOWN_GOOD=""
+if [ -s "$APP_DIR/current_tag" ]; then
+  KNOWN_GOOD="$(head -n1 "$APP_DIR/current_tag")"
+  if ! [[ $KNOWN_GOOD =~ $TAG_RE ]]; then
+    log "WARNING: ignoring an invalid current_tag file"
+    KNOWN_GOOD=""
+  fi
+fi
+if [ -n "$KNOWN_GOOD" ]; then
+  PREV_TAG=$KNOWN_GOOD
+  PREV_SOURCE="current_tag file (last known-good)"
+  if [ -n "$RUNNING_TAG" ] && [ "$RUNNING_TAG" != "$KNOWN_GOOD" ]; then
+    log "WARNING: the running $API_SERVICE container has tag $RUNNING_TAG but current_tag (last known-good) is $KNOWN_GOOD: unexpected host state (earlier failed rollback or manual change?). A failure will roll back to current_tag $KNOWN_GOOD."
+  fi
+else
+  PREV_TAG=$RUNNING_TAG
+  PREV_SOURCE="running $API_SERVICE container"
 fi
 if [ -z "$PREV_TAG" ]; then
   PREV_TAG="$(env_value IMAGE_TAG)"

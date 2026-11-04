@@ -70,7 +70,7 @@ if [ -n "$ENV_FILE_SETTINGS" ]; then
       value=${BASH_REMATCH[2]}
       value=${value%$'\r'}
       if [[ $value =~ ^\"(.*)\"$ || $value =~ ^\'(.*)\'$ ]]; then value=${BASH_REMATCH[1]}; fi
-      if [ -z "${!key+x}" ]; then export "$key=$value"; fi
+      if [ -z "${!key+x}" ] && [ -n "$value" ]; then export "$key=$value"; fi # empty placeholders stay unset
     fi
   done <"$ENV_FILE_SETTINGS"
 fi

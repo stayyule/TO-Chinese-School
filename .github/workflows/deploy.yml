@@ -11,6 +11,11 @@
 # The tag must be one CI has built and pushed (ghcr.io/<owner>/tocs-api|tocs-web:<tag>, typically the git SHA).
 # On the host, /opt/tocs/deploy.sh (installed from deploy/ by Ansible) takes a backup, records the previous tag,
 # pulls, migrates, restarts and health-checks, and rolls back to the previous tag on failure (exit non-zero).
+# A failed off-site backup upload (backup.sh exit 4) ABORTS the deploy by design (fail-safe: no deploy without an
+# off-site copy when BACKUP_REMOTE is configured); nothing is changed on the host.
+# The final "Smoke check" step does NOT roll back: the host has already passed deploy.sh's own health check, so a
+# failure here (DNS, firewall, certificate, ...) only fails the run for a human to investigate. To roll back by hand,
+# run this workflow again with the previous tag (/opt/tocs/previous_tag on the host).
 name: deploy
 
 on:

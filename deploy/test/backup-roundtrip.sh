@@ -225,6 +225,14 @@ for bad in 0 -1 abc 14x; do
 done
 run "$WORK/o" env "${DIRECT_ENV[@]}" bash "$DEPLOY/backup.sh"
 check "backup without a destination argument is a usage error (exit $RC)" test "$RC" -eq 2
+NO_RECIPIENT_ENV=("${DIRECT_ENV[@]:0:6}") # DIRECT_ENV without BACKUP_AGE_RECIPIENT (its last element)
+run "$WORK/o" env -u BACKUP_AGE_RECIPIENT "${NO_RECIPIENT_ENV[@]}" BACKUP_ENV_FILE="$DEPLOY/backup.env.example" bash "$DEPLOY/backup.sh" "$D"
+check "an unmodified backup.env.example (empty recipient) is refused (exit $RC)" \
+  bash -c '[ "$1" -eq 2 ] && grep -q BACKUP_AGE_RECIPIENT "$2" && [ "$3" -eq 0 ]' _ "$RC" "$WORK/o.err" "$(matching_files "$D")"
+sed "s/^BACKUP_AGE_RECIPIENT=\$/BACKUP_AGE_RECIPIENT=$RECIPIENT/" "$DEPLOY/backup.env.example" >"$WORK/backup.env"
+D2="$WORK/b-envfile"
+run "$WORK/o" env -u BACKUP_AGE_RECIPIENT "${NO_RECIPIENT_ENV[@]}" BACKUP_ENV_FILE="$WORK/backup.env" bash "$DEPLOY/backup.sh" "$D2"
+check "backup.env.example with only the recipient filled in works (exit $RC)" test "$RC" -eq 0
 
 echo "--- backup: direct mode"
 D="$WORK/b-direct"
@@ -325,6 +333,33 @@ for bad in "$URL_BASE" "$URL_BASE/" "mysql://postgres:${PGPW}@127.0.0.1:${PG_POR
   run "$WORK/o" env "${RESTORE_ENV[@]}" bash "$DEPLOY/restore.sh" --force "$A1" "$bad"
   check "restore rejects database URL #$((++URLN)) (no db name / wrong scheme / password in query) (exit $RC)" test "$RC" -eq 2
 done
+
+# Query parameters that libpq would honour over the URL path (dbname=, host=, ...) must be refused before ANY
+# connection: `.../tocs_none?dbname=tocs --force` would otherwise --clean restore into tocs while printing tocs_none.
+sql tocs "UPDATE bk_students SET name = 'marker-untouched' WHERE id = 2" >/dev/null
+run "$WORK/o" env "${RESTORE_ENV[@]}" bash "$DEPLOY/restore.sh" --force "$A1" "$URL_BASE/tocs_none?dbname=tocs"
+check "restore rejects ?dbname= overriding the path database (exit $RC)" test "$RC" -eq 2
+check "  ... before any work (no checksum / decryption / connection step ran)" bash -c '! grep -q "checksum ok\|restoring\|FORCE" "$1"' _ "$WORK/o.err"
+check "  ... database tocs untouched (marker row still there)" \
+  test "$(sql tocs "SELECT name FROM bk_students WHERE id = 2")" = marker-untouched
+sql tocs "UPDATE bk_students SET name = 'O''Brien' WHERE id = 2" >/dev/null
+for q in "DBNAME=tocs" "host=127.0.0.1" "options=-c%20search_path%3Devil" "%64bname=tocs" "service=x" "user=postgres" \
+  "sslmode=disable&sslmode=require" "sslmode=disable&&connect_timeout=5" "passfile=/tmp/x" "hostaddr=127.0.0.1" "port=5432"; do
+  run "$WORK/o" env "${RESTORE_ENV[@]}" bash "$DEPLOY/restore.sh" --force "$A1" "$URL_BASE/tocs_none?$q"
+  check "restore rejects query '?$q' (exit $RC)" bash -c '[ "$1" -eq 2 ] && ! grep -q "checksum ok" "$2"' _ "$RC" "$WORK/o.err"
+done
+sql postgres "CREATE DATABASE tocs_restore_q" >/dev/null
+run "$WORK/o" env "${RESTORE_ENV[@]}" bash "$DEPLOY/restore.sh" "$A1" "$URL_BASE/tocs_restore_q?sslmode=disable&connect_timeout=5&application_name=tocs-restore"
+check "allowed query parameters (sslmode, connect_timeout, application_name) still work (exit $RC)" \
+  bash -c '[ "$1" -eq 0 ] && [ "$2" = "$3" ]' _ "$RC" "$(sql tocs_restore_q "$ROWS_SQL" 2>/dev/null)" "$EXPECTED"
+check "  ... no identity-permission warning for a mode-600 identity" bash -c '! grep -qi "identity file is" "$1"' _ "$WORK/o.err"
+
+cp "$WORK/keys/id.txt" "$WORK/keys/id-loose.txt"
+chmod 644 "$WORK/keys/id-loose.txt"
+sql postgres "CREATE DATABASE tocs_restore_perm" >/dev/null
+run "$WORK/o" env "${RESTORE_ENV[@]}" BACKUP_AGE_IDENTITY_FILE="$WORK/keys/id-loose.txt" bash "$DEPLOY/restore.sh" "$A1" "$URL_BASE/tocs_restore_perm"
+check "group/world-readable identity: restore still succeeds (exit $RC)" test "$RC" -eq 0
+check "  ... but warns on stderr" grep -qi 'WARNING: identity file is' "$WORK/o.err"
 run "$WORK/o" env BACKUP_AGE_IDENTITY_FILE="$WORK/keys/wrong.txt" bash "$DEPLOY/restore.sh" "$A1" "$URL_BASE/tocs_none"
 check "restore with a wrong identity fails (exit $RC)" test "$RC" -ne 0
 run "$WORK/o" env BACKUP_AGE_IDENTITY_FILE= bash "$DEPLOY/restore.sh" "$A1" "$URL_BASE/tocs_none"
@@ -424,6 +459,15 @@ LOCK_HOLDER=""
 run "$WORK/o" env "${DEPLOY_ENV[@]}" bash "$DEPLOY/deploy.sh" v1
 check "deploying back to v1 (a normal forward deploy) exits 0 and runs v1 (exit $RC)" \
   bash -c '[ "$1" -eq 0 ] && [ "$2" = v1 ] && [ "$3" = v2 ]' _ "$RC" "$(api_tag)" "$(cat "$APP/previous_tag")"
+
+# Broken state (e.g. after an exit-4 failed rollback): the running container (v1) is not the last known-good tag
+# recorded in current_tag (v2). A failed deploy must roll back to current_tag, not to whatever happens to run.
+printf 'v2\n' >"$APP/current_tag"
+run "$WORK/o" env "${DEPLOY_ENV[@]}" bash "$DEPLOY/deploy.sh" v3
+check "running tag != current_tag: failed deploy of v3 exits 1 (exit $RC)" test "$RC" -eq 1
+check "  ... rolled back to current_tag v2, not to the running v1 (got $(api_tag))" test "$(api_tag)" = v2
+check "  ... previous_tag records v2" test "$(cat "$APP/previous_tag" 2>/dev/null)" = v2
+check "  ... logs a WARNING about the mismatch" grep -q 'WARNING.*current_tag' "$WORK/o.err"
 
 echo "--- secrets"
 check "no script output contains the database password" bash -c '! grep -qF "$1" "$2"' _ "$PGPW" "$LOG"
