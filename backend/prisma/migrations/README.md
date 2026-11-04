@@ -27,6 +27,12 @@ The database already has the baseline: run steps 3 and 4 only (step 3's SQL pre-
 then applies only the foundation migration and later ones). Roles come from `init-roles.sql` run by a DBA
 with production passwords supplied via `PGOPTIONS="-c tocs.migrator_password=... -c tocs.app_password=..."`.
 
+With `deploy/compose.prod.yml`, the one-shot `migrate` service (`deploy/migrate.sh`, image
+`tocs-api:<tag>-migrate`) runs steps 3 and 4 on every `up` before the api starts (step 3's SQL is
+`CREATE TABLE IF NOT EXISTS`, so re-running it is a no-op). The `postgres` service runs `init-roles.sql` on first start
+of an empty volume; the legacy baseline (production dump) must be restored into that volume before the first `up`,
+otherwise the foundation migration fails and the api never starts. The api itself never migrates.
+
 ## Integration tests
 
 `backend/test/global-setup.ts` builds `tocs_test` as baseline.sql + every migration.sql in order

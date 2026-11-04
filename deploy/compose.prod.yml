@@ -1,0 +1,127 @@
+# Production stack for register.to-cs.org.
+#   cp deploy/.env.prod.example deploy/.env.prod   # fill in; chmod 600; never commit
+#   docker compose -p tocs --env-file deploy/.env.prod -f deploy/compose.prod.yml pull
+#   docker compose -p tocs --env-file deploy/.env.prod -f deploy/compose.prod.yml up -d
+# Only caddy publishes host ports. postgres sits on the `internal` network (no host port, no outbound route); the
+# api joins `edge` (reached only by caddy; outbound SMTP) and `internal`. `migrate` runs once per `up` and must
+# succeed before the api starts; the api entrypoint never migrates.
+# Variables marked :? are required; compose refuses to start without them.
+
+name: tocs
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=16m
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/tocs-web:${IMAGE_TAG:?set IMAGE_TAG}
+    <<: *hardening
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-register.to-cs.org}
+      CADDY_TLS: ${CADDY_TLS:?set CADDY_TLS (ACME e-mail, or internal for local tests)}
+    ports:
+      - "${HTTP_PORT:-80}:8080"
+      - "${HTTPS_PORT:-443}:8443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *logging
+
+  api:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/tocs-api:${IMAGE_TAG:?set IMAGE_TAG}
+    <<: *hardening
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://tocs_app:${TOCS_APP_PASSWORD:?set TOCS_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-tocs}
+      # Required by loadEnv / schema directUrl but never used at runtime (only the migrate service runs DDL), so
+      # the api deliberately gets it WITHOUT the password: a compromised api cannot act as tocs_migrator.
+      DATABASE_MIGRATOR_URL: postgresql://tocs_migrator@postgres:5432/${POSTGRES_DB:-tocs}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET (>= 32 chars)}
+      APP_BASE_URL: ${APP_BASE_URL:-https://register.to-cs.org}
+      MAIL_TRANSPORT: ${MAIL_TRANSPORT:-smtp}
+      SMTP_URL: ${SMTP_URL:-}
+      # Caddy is the only hop in front of the api: believe exactly one X-Forwarded-For entry (the one Caddy sets).
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # No `ports:` ever: the api is reachable only through caddy.
+    expose: ["3000"]
+    networks: [edge, internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    pids_limit: 256
+    logging: *logging
+
+  migrate:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/tocs-api:${IMAGE_TAG:?set IMAGE_TAG}-migrate
+    <<: *hardening
+    restart: "no"
+    environment:
+      DATABASE_MIGRATOR_URL: postgresql://tocs_migrator:${TOCS_MIGRATOR_PASSWORD:?set TOCS_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB:-tocs}
+      HOME: /tmp
+    networks: [internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  postgres:
+    image: postgres:16.15-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tocs}
+      # Read by deploy/db/init-roles.sql on first start of an empty volume (fails closed without them).
+      PGOPTIONS: "-c tocs.migrator_password=${TOCS_MIGRATOR_PASSWORD:?set TOCS_MIGRATOR_PASSWORD} -c tocs.app_password=${TOCS_APP_PASSWORD:?set TOCS_APP_PASSWORD}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init-roles.sql:/docker-entrypoint-initdb.d/10-init-roles.sql:ro
+    # No `ports:` ever. Administer with: docker compose ... exec postgres psql -U postgres
+    networks: [internal]
+    security_opt: ["no-new-privileges:true"]
+    shm_size: 128m
+    healthcheck:
+      # -h 127.0.0.1: the entrypoint's temporary init server listens on the socket only, so this stays unhealthy
+      # until initialisation (init-roles.sql) has finished and the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging: *logging
+
+networks:
+  edge: {}
+  internal:
+    internal: true
+
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}

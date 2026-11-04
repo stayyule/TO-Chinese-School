@@ -8,6 +8,7 @@
 /.gitignore text eol=lf
 /.gitmodules text eol=lf
 /.nvmrc text eol=lf
+/.dockerignore text eol=lf
 
 backend/** text=auto eol=lf
 frontend/** text=auto eol=lf
