@@ -30,6 +30,12 @@ describe('menu', () => {
     expect(menuItems((c) => c === 'people.read').map((i) => String(i?.key))).toEqual(['/', '/registration/people'])
   })
 
+  it('gates the Instruction entry on the instruction officer panel, not on school_classes.read', () => {
+    const keys = (perms: string[]) => menuItems((c) => perms.includes(c)).map((i) => String(i?.key))
+    expect(keys(RO)).not.toContain('/instruction')
+    expect(keys(['home.panel.instruction_officer'])).toEqual(['/', '/instruction'])
+  })
+
   it('renders the Administration entry for a Registration Officer in the layout', async () => {
     mockMe(RO)
     renderApp('/')

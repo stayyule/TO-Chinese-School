@@ -15,7 +15,7 @@ export function menuItems(can: (code: string) => boolean): MenuItem[] {
   if (can('access.roles.read')) admin.push({ key: '/admin/roles', label: t('nav.admin.roles') })
   if (can('auth.invitations.create')) admin.push({ key: '/admin/invitations', label: t('nav.admin.invitations') })
   if (admin.length > 0) items.push({ key: '/admin', label: t('nav.admin'), children: admin })
-  if (can('school_classes.read')) items.push({ key: '/instruction', label: t('nav.instruction') })
+  if (can('home.panel.instruction_officer')) items.push({ key: '/instruction', label: t('nav.instruction') })
   if (can('home.panel.communication_officer')) items.push({ key: '/communication', label: t('nav.communication') })
   return items
 }

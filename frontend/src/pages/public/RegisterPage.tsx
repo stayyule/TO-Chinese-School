@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError, apiJson } from '../../api/client'
 import { t } from '../../i18n'
+import { digitCount } from '../parent/helpers'
 import { MIN_PASSWORD_LENGTH, PASSWORD_TARGETS, placeError, requiredRule, type FieldTarget } from './shared'
 import { AuthShell, ErrorAlert } from './AuthShell'
 
@@ -19,8 +20,6 @@ const TARGETS: Record<string, FieldTarget> = {
   PASSWORD_TOO_SHORT: PASSWORD_TARGETS.PASSWORD_TOO_SHORT as FieldTarget,
   USERNAME_TAKEN: { field: ['username'], key: 'register.usernameTaken' },
 }
-
-const digitCount = (s: string) => s.replace(/\D/g, '').length
 
 /** Trimmed copy of an object's string values; blank optional values are dropped. */
 function clean<T extends object>(obj: T): T {
