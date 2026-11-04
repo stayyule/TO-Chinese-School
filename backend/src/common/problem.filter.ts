@@ -32,6 +32,9 @@ export class ProblemFilter implements ExceptionFilter {
       details = exception.details ?? null;
     } else if (exception instanceof HttpException) {
       status = exception.getStatus();
+      // Server-side failures surfaced as HttpException: log them like unhandled errors, but without the
+      // message or response body (they may carry details that must not reach the logs).
+      if (status >= 500) logger.error({ requestId, status, errName: exception.name }, 'http exception');
       code = STATUS_CODES[status] ?? 'HTTP_ERROR';
       const body = exception.getResponse();
       if (typeof body === 'object' && body !== null) {

@@ -12,6 +12,7 @@ async function bootstrap(): Promise<void> {
   loadEnv(process.env); // fail fast, naming any missing/invalid variable, before the app is created
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   configureApp(app);
+  app.enableShutdownHooks(); // SIGTERM/SIGINT run onModuleDestroy (e.g. AccountService drains detached mails)
   assertRouteCoverage(app); // default-deny: refuse to start if any route lacks an access rule
   mountOpenApi(app, process.env.NODE_ENV); // JSON document for client generation; skipped in production
   await app.listen(process.env.PORT ?? 3000);

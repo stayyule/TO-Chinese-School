@@ -146,6 +146,8 @@ else
   SITE="$(env_value SITE_ADDRESS)"
   SITE=${SITE:-register.to-cs.org}
   [[ $SITE =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,252})$ ]] || die 2 "SITE_ADDRESS in the env file is not a plain host name"
+  # Always $SITE:443 on 127.0.0.1, regardless of HTTPS_PORT in the env file: if the proxy is published on another
+  # host port, set DEPLOY_HEALTH_URL (and a matching --resolve is then not applied).
   HEALTH_URL="https://$SITE/healthz"
   CURL+=(--resolve "$SITE:443:127.0.0.1")
 fi

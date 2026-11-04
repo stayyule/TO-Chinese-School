@@ -11,11 +11,13 @@ import { validationProblem, type ValidationErrors } from './validation';
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_QUERY_LENGTH = 100;
 const INT4_MAX = 2_147_483_647;
+/** Keeps (page - 1) * pageSize (pageSize at most 100) far below the int4 range of the OFFSET. */
+const MAX_PAGE = 1_000_000;
 
-/** A positive integer query value (default when absent); anything else is reported under `field`. */
-function positiveInt(errors: ValidationErrors, field: string, raw: unknown, fallback: number): number {
+/** A positive integer query value up to `max` (default when absent); anything else is reported under `field`. */
+function positiveInt(errors: ValidationErrors, field: string, raw: unknown, fallback: number, max = INT4_MAX): number {
   if (raw === undefined) return fallback;
-  if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw) || Number(raw) < 1 || Number(raw) > INT4_MAX) {
+  if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw) || Number(raw) < 1 || Number(raw) > max) {
     errors[field] = 'INVALID';
     return fallback;
   }
@@ -33,13 +35,16 @@ export class StaffController {
     private readonly families: FamiliesService,
   ) {}
 
-  /** `pageSize` above 100 is clamped to 100; non-numeric or < 1 `page`/`pageSize`, or a bad `query`, is a field-keyed 422. */
+  /**
+   * `pageSize` above 100 is clamped to 100; non-numeric or < 1 `page`/`pageSize`, `page` above 1,000,000, or a bad
+   * `query`, is a field-keyed 422.
+   */
   @Get('people')
   @RequirePermission('people.read')
   async search(@Query('query') query?: unknown, @Query('page') page?: unknown, @Query('pageSize') pageSize?: unknown): Promise<{ items: PersonView[]; total: number }> {
     const errors: ValidationErrors = {};
     if (query !== undefined && (typeof query !== 'string' || query.length > MAX_QUERY_LENGTH || query.includes('\u0000'))) errors.query = 'INVALID';
-    const p = positiveInt(errors, 'page', page, 1);
+    const p = positiveInt(errors, 'page', page, 1, MAX_PAGE);
     const size = positiveInt(errors, 'pageSize', pageSize, DEFAULT_PAGE_SIZE);
     const problem = validationProblem(errors);
     if (problem) throw problem;

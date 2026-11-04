@@ -168,6 +168,16 @@ describe('registration officer people and family API (app connected as tocs_app)
       expect(res.body.items).toHaveLength(25);
     });
 
+    it('accepts page 1000000 (empty page) but rejects 1000001 with 422 keyed page (no int4 skip overflow)', async () => {
+      const ok = await call('get', '/people?page=1000000&pageSize=100', sidReg);
+      expect(ok.status).toBe(200);
+      expect(ok.body.items).toEqual([]);
+      const res = await call('get', '/people?page=1000001&pageSize=100', sidReg);
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+      expect(Object.keys(res.body.details)).toEqual(['page']);
+    });
+
     it.each(['page=abc', 'pageSize=abc', 'page=0', 'pageSize=0', 'page=-1', 'page=1.5', `query=${'a'.repeat(101)}`, 'query=a%00b'])(
       'rejects bad query parameter %s with 422 keyed by field',
       async (qs) => {
