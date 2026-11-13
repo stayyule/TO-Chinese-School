@@ -270,8 +270,8 @@ describe('book charges', () => {
     await user.type(k, '1.00')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('A book charge does not belong to this school year. Reload the page and try again.')).toBeInTheDocument()
-    // the AntD button is named 'loading Save' until the failed request settles, so wait for it
-    await user.click(await screen.findByRole('button', { name: 'Save' }))
+    // AntD keeps the spinner (aria-label 'loading') in the button for its leave animation, which jsdom never finishes, so the name stays 'loading Save'; match the end
+    await user.click(screen.getByRole('button', { name: /Save$/ }))
     expect(await screen.findByText('This value is out of range')).toBeInTheDocument()
   })
 })
