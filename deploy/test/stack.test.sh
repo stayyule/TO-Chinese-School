@@ -223,8 +223,10 @@ check "spoofed X-Forwarded-For is not trusted (audit ip '$AUDIT_IP' != 1.2.3.4)"
 
 # --- network exposure
 PUBLISHED="$(docker ps --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Label "com.docker.compose.service"}} {{.Ports}}')"
-PG_PORT="$(compose port postgres 5432 2>/dev/null || true)"
-check "postgres publishes no host port (compose port postgres 5432: '${PG_PORT}')" bash -c '[ -z "$1" ] || [ "$1" = ":0" ]' _ "$PG_PORT"
+# `compose port` output for an unpublished port varies by version (empty, ":0", "invalid IP:0"), so read the
+# container's actual published ports instead: a published port always renders as "<ip>:<host>-><container>/tcp".
+PG_PORTS="$(grep '^postgres ' <<<"$PUBLISHED" || true)"
+check "postgres publishes no host port (docker ps: '${PG_PORTS}')" bash -c '[ -n "$1" ] && [[ "$1" != *"->"* ]]' _ "$PG_PORTS"
 check "only caddy publishes host ports" bash -c 'while read -r svc ports; do if [ "$svc" != caddy ] && [[ "$ports" == *"->"* ]]; then exit 1; fi; done <<<"$1"' _ "$PUBLISHED"
 check "nothing listens on a host port other than caddy's" bash -c '[[ "$1" == *"->8443/tcp"* ]] && ! grep -v "^caddy " <<<"$1" | grep -q -- "->"' _ "$PUBLISHED"
 check "postgres is on the internal network only" \
