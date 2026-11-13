@@ -216,7 +216,8 @@ describe('register with invitation', () => {
     await user.click(screen.getByRole('button', { name: 'Submit' }))
     expect(await screen.findByText('That username is already taken. Please choose another.')).toBeInTheDocument()
     code = 'PHONE_MISMATCH'
-    await user.click(screen.getByRole('button', { name: 'Submit' }))
+    // the AntD button is named 'loading Submit' until the failed request settles, so wait for it
+    await user.click(await screen.findByRole('button', { name: 'Submit' }))
     expect(await screen.findByText('The phone number does not match our records')).toBeInTheDocument()
   })
 })
@@ -293,7 +294,8 @@ describe('register', () => {
     await fill(user)
     await user.click(screen.getByRole('button', { name: 'Submit' }))
     expect(await screen.findByText('That username is already taken. Please choose another.')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Submit' }))
+    // the AntD button is named 'loading Submit' until the failed request settles, so wait for it
+    await user.click(await screen.findByRole('button', { name: 'Submit' }))
     expect(await screen.findByText('This value is not valid')).toBeInTheDocument()
     expect(screen.getByLabelText('Zip code')).toHaveAccessibleDescription(/This value is not valid/)
     expect(screen.getByLabelText('Gender')).toBeInTheDocument()
