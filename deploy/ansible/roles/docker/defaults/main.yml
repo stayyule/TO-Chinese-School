@@ -1,0 +1,34 @@
+---
+# Docker Engine + Compose v2 plugin from Docker's official apt repository. The repository key is downloaded over
+# HTTPS and accepted ONLY if its primary key fingerprint equals docker_apt_key_fingerprint (Docker's published
+# release key, https://docs.docker.com/engine/install/ubuntu/). A mismatch removes the key and fails the play.
+docker_apt_repo_url: https://download.docker.com/linux/ubuntu
+docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+docker_apt_key_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+docker_apt_keyring: /etc/apt/keyrings/docker.asc
+
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-compose-plugin
+
+# Distribution packages that conflict with docker-ce (removed if present; none are on a fresh host).
+docker_conflicting_packages:
+  - docker.io
+  - docker-doc
+  - docker-compose
+  - docker-compose-v2
+  - podman-docker
+  - containerd
+  - runc
+
+# /etc/docker/daemon.json. Container log rotation (compose.prod.yml also sets it per service), keep containers
+# running across daemon restarts/upgrades, and no-new-privileges for every container by default.
+docker_daemon_config:
+  log-driver: json-file
+  log-opts:
+    max-size: "10m"
+    max-file: "5"
+  live-restore: true
+  no-new-privileges: true

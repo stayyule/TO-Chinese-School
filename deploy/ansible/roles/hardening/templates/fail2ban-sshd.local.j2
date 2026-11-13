@@ -1,0 +1,12 @@
+# {{ ansible_managed }} (deploy/ansible, role hardening)
+[DEFAULT]
+ignoreip = {{ fail2ban_ignoreip }}
+
+[sshd]
+enabled  = true
+port     = ssh
+backend  = systemd
+mode     = aggressive
+maxretry = {{ fail2ban_sshd_maxretry }}
+findtime = {{ fail2ban_sshd_findtime }}
+bantime  = {{ fail2ban_sshd_bantime }}

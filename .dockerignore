@@ -1,0 +1,19 @@
+# Build context for deploy/Dockerfile.backend and deploy/Dockerfile.frontend (context = repository root).
+# Allow-list: everything is excluded except what the images need.
+*
+!backend/
+!frontend/
+!deploy/Caddyfile
+!deploy/migrate.sh
+!deploy/db/
+
+# Never ship local state, secrets or build output into a build context.
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+**/*.log
+backend/openapi.json
+backend/test/

@@ -1,0 +1,28 @@
+# {{ ansible_managed }} (deploy/ansible, role hardening)
+# OpenSSH uses the FIRST value it reads for a keyword. sshd_config includes sshd_config.d/*.conf at its top, in
+# lexical order, so this 00- file wins over 50-cloud-init.conf and over the rest of sshd_config.
+# Do not add Match blocks here: they would swallow every later line of the configuration.
+
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+AuthenticationMethods publickey
+AllowUsers {{ deploy_user }} {{ admin_user }}
+
+MaxAuthTries {{ sshd_max_auth_tries }}
+MaxSessions {{ sshd_max_sessions }}
+MaxStartups {{ sshd_max_startups }}
+LoginGraceTime {{ sshd_login_grace_time }}
+ClientAliveInterval {{ sshd_client_alive_interval }}
+ClientAliveCountMax {{ sshd_client_alive_count_max }}
+
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+PermitTunnel no
+PermitUserEnvironment no
+GatewayPorts no
+LogLevel VERBOSE

@@ -1,0 +1,15 @@
+Dear {{name}},
+
+You asked for a reminder of the username(s) on record for your account on the
+Thousand Oaks Chinese School web site:
+
+{{usernames}}
+
+You can sign-in to the site at:
+{{signinUrl}}
+
+If you did not request this reminder, please report fraud to us at
+{{supportEmail}}
+
+Regards,
+Thousand Oaks Chinese School

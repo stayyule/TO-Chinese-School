@@ -1,0 +1,130 @@
+---
+- name: Install the tools backup.sh and deploy.sh need on the host
+  ansible.builtin.apt:
+    name: [age, rclone, curl, jq, util-linux]
+    state: present
+
+# ---- /opt/tocs: owned by deploy (deploy.sh writes previous_tag / current_tag / .deploy.lock here)
+- name: Create the application directory
+  ansible.builtin.file:
+    path: "{{ tocs_app_dir }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0750"
+
+- name: Create the local backup directory
+  ansible.builtin.file:
+    path: "{{ tocs_backup_dir }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0700"
+
+- name: Create the db directory
+  ansible.builtin.file:
+    path: "{{ tocs_app_dir }}/db"
+    state: directory
+    owner: root
+    group: "{{ deploy_user }}"
+    mode: "0750"
+
+# Scripts: deploy may run them but not modify them.
+- name: Install deploy.sh, backup.sh and restore.sh
+  ansible.builtin.copy:
+    src: "{{ tocs_deploy_src_dir }}/{{ item }}"
+    dest: "{{ tocs_app_dir }}/{{ item }}"
+    owner: root
+    group: "{{ deploy_user }}"
+    mode: "0750"
+  loop: [deploy.sh, backup.sh, restore.sh]
+
+- name: Install compose.prod.yml
+  ansible.builtin.copy:
+    src: "{{ tocs_deploy_src_dir }}/compose.prod.yml"
+    dest: "{{ tocs_app_dir }}/compose.prod.yml"
+    owner: root
+    group: "{{ deploy_user }}"
+    mode: "0640"
+
+# Bind-mounted into the postgres container, which reads it as its own uid (999): it must be world-readable. It holds
+# no secret (the role passwords arrive through PGOPTIONS from .env).
+- name: Install db/init-roles.sql (mounted by the postgres service)
+  ansible.builtin.copy:
+    src: "{{ tocs_deploy_src_dir }}/db/init-roles.sql"
+    dest: "{{ tocs_app_dir }}/db/init-roles.sql"
+    owner: root
+    group: "{{ deploy_user }}"
+    mode: "0644"
+
+# deploy runs docker compose / deploy.sh / backup.sh, which read .env: owned by deploy, 600.
+- name: Render /opt/tocs/.env from the vault variables
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ tocs_app_dir }}/.env"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+  no_log: true
+
+- name: Render /opt/tocs/backup.env (age recipient = public key only)
+  ansible.builtin.template:
+    src: backup.env.j2
+    dest: "{{ tocs_app_dir }}/backup.env"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+
+# ---- Docker client config of deploy (GHCR credentials when provided)
+- name: Create ~deploy/.docker
+  ansible.builtin.file:
+    path: "{{ deploy_home }}/.docker"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0700"
+
+- name: Log deploy in to GHCR (only when ghcr_username and ghcr_token are provided)
+  when: ghcr_username | length > 0 and ghcr_token | length > 0
+  block:
+    - name: Check whether deploy already holds GHCR credentials
+      ansible.builtin.command:
+        argv: [grep, -q, '"ghcr.io"', "{{ deploy_home }}/.docker/config.json"]
+      register: app_ghcr_present
+      changed_when: false
+      failed_when: false
+
+    - name: Docker login to ghcr.io as deploy (token from stdin, never on a command line)
+      ansible.builtin.command:
+        argv: [docker, login, ghcr.io, --username, "{{ ghcr_username }}", --password-stdin]
+        stdin: "{{ ghcr_token }}"
+      become: true
+      become_user: "{{ deploy_user }}"
+      no_log: true
+      changed_when: true
+      when: app_ghcr_present.rc != 0 or ghcr_force_login | bool
+
+    - name: Restrict ~deploy/.docker/config.json to deploy
+      ansible.builtin.file:
+        path: "{{ deploy_home }}/.docker/config.json"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0600"
+
+# ---- Backup timer
+- name: Install the backup service and timer units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [tocs-backup.service, tocs-backup.timer]
+  register: app_backup_units
+
+- name: Enable and start the backup timer
+  ansible.builtin.systemd_service:
+    name: tocs-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ app_backup_units is changed }}"

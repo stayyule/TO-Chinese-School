@@ -1,0 +1,17 @@
+# Tiny stand-in for the api / migrate images, used only by deploy/test/backup-roundtrip.sh to exercise deploy.sh.
+# Build args choose the behaviour of each test tag:
+#   VERSION       served at /version
+#   HEALTHZ=0     no /healthz  -> deploy.sh's health poll fails (the container itself stays healthy)
+#   ALIVE=0       no /version  -> the container healthcheck fails, so `compose up --wait` fails
+#   MIGRATE_EXIT  exit code of the image when run as the `migrate` service
+FROM busybox:1.36.1
+ARG VERSION=dev
+ARG HEALTHZ=1
+ARG ALIVE=1
+ARG MIGRATE_EXIT=0
+RUN mkdir -p /www \
+ && printf '%s\n' "$MIGRATE_EXIT" > /migrate_exit \
+ && if [ "$ALIVE" = 1 ]; then printf '%s\n' "$VERSION" > /www/version; fi \
+ && if [ "$HEALTHZ" = 1 ]; then printf '{"status":"ok"}' > /www/healthz; fi
+EXPOSE 8080
+CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]

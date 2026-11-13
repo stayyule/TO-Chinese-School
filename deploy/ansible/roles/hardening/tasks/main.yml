@@ -1,0 +1,171 @@
+---
+- name: Install base security packages
+  ansible.builtin.apt:
+    name:
+      - acl                  # lets Ansible become the unprivileged deploy user safely
+      - ca-certificates
+      - fail2ban
+      - openssh-server
+      - python3-systemd      # fail2ban systemd journal backend
+      - tzdata               # the backup timer's OnCalendar uses America/Los_Angeles
+      - ufw
+      - unattended-upgrades
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ---- deploy user: key-only (password locked), authorized_keys exclusively from deploy_ssh_public_keys
+- name: Create the deploy group
+  ansible.builtin.group:
+    name: "{{ deploy_user }}"
+    state: present
+
+- name: Create the deploy user (password locked, key-only login)
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    home: "{{ deploy_home }}"
+    shell: /bin/bash
+    create_home: true
+    password_lock: true
+    state: present
+
+- name: Create ~deploy/.ssh
+  ansible.builtin.file:
+    path: "{{ deploy_home }}/.ssh"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0700"
+
+- name: Install deploy's authorized_keys (exclusive)
+  ansible.builtin.copy:
+    dest: "{{ deploy_home }}/.ssh/authorized_keys"
+    content: "{{ deploy_ssh_public_keys | join('\n') }}\n"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+
+# ---- sshd
+- name: Check sshd_config includes sshd_config.d (Ubuntu default)
+  ansible.builtin.command:
+    argv: [grep, -Eq, '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf', /etc/ssh/sshd_config]
+  changed_when: false
+
+- name: Ensure the sshd privilege separation directory exists (needed by sshd -t)
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the sshd hardening drop-in (validated with sshd -t before it is put in place)
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-tocs-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify:
+    - Validate the full sshd configuration
+    - Reload sshd
+
+# ---- fail2ban
+- name: Configure the fail2ban sshd jail
+  ansible.builtin.template:
+    src: fail2ban-sshd.local.j2
+    dest: /etc/fail2ban/jail.d/tocs-sshd.local
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Enable and start fail2ban
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    enabled: true
+    state: started
+
+# ---- unattended-upgrades
+- name: Enable periodic package list updates and unattended upgrades
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Restrict unattended-upgrades to security origins, no automatic reboot
+  ansible.builtin.template:
+    src: 52tocs-unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/52tocs-unattended-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable the apt timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [apt-daily.timer, apt-daily-upgrade.timer]
+
+- name: Enable the unattended-upgrades service (finishes upgrades before shutdown)
+  ansible.builtin.systemd_service:
+    name: unattended-upgrades
+    enabled: true
+
+# ---- sysctl
+- name: Install network sysctl settings
+  ansible.builtin.template:
+    src: sysctl-hardening.conf.j2
+    dest: /etc/sysctl.d/60-tocs-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply sysctl settings
+
+# ---- ufw: allow rules first, then defaults, then enable (an active ufw never runs without the SSH rule)
+- name: Allow the permitted TCP ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  loop: "{{ ufw_allowed_tcp_ports }}"
+
+- name: Set ufw default policies
+  community.general.ufw:
+    default: "{{ item.policy }}"
+    direction: "{{ item.direction }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+    - { direction: routed, policy: deny }
+
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
+    logging: "{{ ufw_logging }}"
+
+- name: Read the ufw rule set
+  ansible.builtin.command:
+    argv: [ufw, show, added]
+  register: hardening_ufw_added
+  changed_when: false
+
+- name: Check ufw allows ONLY the permitted ports
+  ansible.builtin.assert:
+    that:
+      - (hardening_ufw_added.stdout_lines | map('trim') | select('match', '^ufw ') | sort | list)
+        == (ufw_allowed_tcp_ports | map('string') | map('regex_replace', '^', 'ufw allow ') | map('regex_replace', '$', '/tcp')
+            | sort | list)
+    fail_msg: >-
+      ufw holds rules other than {{ ufw_allowed_tcp_ports | join('/tcp, ') }}/tcp:
+      {{ hardening_ufw_added.stdout_lines | select('match', '^ufw ') | list }}.
+      Delete them (sudo ufw delete <rule>) or add the port to ufw_allowed_tcp_ports deliberately.
+    quiet: true
+
+- name: Flush handlers (sshd and fail2ban pick up the new configuration now)
+  ansible.builtin.meta: flush_handlers

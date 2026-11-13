@@ -1,0 +1,17 @@
+// {{ ansible_managed }} (deploy/ansible, role hardening)
+// Read after Ubuntu's 50unattended-upgrades. "#clear" empties the list defined there so ONLY the origins below
+// (security pockets) are upgraded automatically. Docker's repo is deliberately not listed: Docker Engine updates
+// are applied by hand (they restart containers).
+#clear Unattended-Upgrade::Allowed-Origins;
+#clear Unattended-Upgrade::Origins-Pattern;
+Unattended-Upgrade::Allowed-Origins {
+{% for origin in unattended_upgrades_origins %}
+    "{{ origin }}";
+{% endfor %}
+};
+Unattended-Upgrade::Automatic-Reboot "{{ unattended_upgrades_automatic_reboot | bool | lower }}";
+Unattended-Upgrade::Remove-Unused-Dependencies "{{ unattended_upgrades_remove_unused_dependencies | bool | lower }}";
+{% if unattended_upgrades_mail %}
+Unattended-Upgrade::Mail "{{ unattended_upgrades_mail }}";
+Unattended-Upgrade::MailReport "only-on-error";
+{% endif %}

@@ -1,0 +1,43 @@
+# Throwaway stack for deploy/test/backup-roundtrip.sh (project tocs-bk-test). Mirrors the shape of compose.prod.yml
+# that deploy.sh and backup.sh rely on: a `postgres` service (pg_dump runs inside it in compose mode), a one-shot
+# `migrate` service whose image is <tag>-migrate, and an `api` service with a healthcheck. Images come from a local
+# test registry so that `docker compose pull` is exercised for real. No bind mounts (the test runs in a container).
+name: tocs-bk-test
+
+services:
+  postgres:
+    image: postgres:16.15-bookworm
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: tocs
+    ports:
+      - "127.0.0.1:${PG_PORT:?set PG_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d tocs"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  migrate:
+    image: ${REGISTRY:?set REGISTRY}/tocs-bk-test-app:${IMAGE_TAG:?set IMAGE_TAG}-migrate
+    command: ["sh", "-c", "exit $$(cat /migrate_exit)"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: ${REGISTRY:?set REGISTRY}/tocs-bk-test-app:${IMAGE_TAG:?set IMAGE_TAG}
+    ports:
+      - "127.0.0.1:${APP_PORT:?set APP_PORT}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/version"]
+      interval: 1s
+      timeout: 2s
+      retries: 3

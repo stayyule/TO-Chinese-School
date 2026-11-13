@@ -1,0 +1,12 @@
+# Copy to inventory.ini and fill in (it holds no secret; secrets go in a vault-encrypted vars file, see README.md).
+# Connect as the ADMIN user (the cloud image's sudo user, e.g. `ubuntu`), never as root and never as deploy.
+# admin_user below MUST be that same account: after the play, sshd's AllowUsers admits only deploy and admin_user.
+#
+# Pin the host key instead of trusting it on first use:
+#   ssh-keyscan -t ed25519 <host> >> ~/.ssh/known_hosts   (compare with the fingerprint shown in the provider console)
+
+[tocs]
+register.to-cs.org ansible_host=203.0.113.10 ansible_user=ubuntu
+
+[tocs:vars]
+admin_user=ubuntu

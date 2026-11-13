@@ -1,0 +1,115 @@
+---
+- name: Install prerequisites for Docker's apt repository
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, gnupg]
+    state: present
+
+- name: Remove distribution packages that conflict with docker-ce
+  ansible.builtin.apt:
+    name: "{{ docker_conflicting_packages }}"
+    state: absent
+
+- name: Create /etc/apt/keyrings
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download and verify Docker's apt key (fingerprint pinned)
+  block:
+    - name: Download Docker's apt repository key
+      ansible.builtin.get_url:
+        url: "{{ docker_apt_key_url }}"
+        dest: "{{ docker_apt_keyring }}"
+        owner: root
+        group: root
+        mode: "0644"
+        force: false
+
+    - name: Read the key's fingerprints
+      ansible.builtin.command:
+        argv: [gpg, --batch, --show-keys, --with-colons, "{{ docker_apt_keyring }}"]
+      register: docker_key_info
+      changed_when: false
+
+    - name: Check the key is exactly Docker's pinned release key
+      ansible.builtin.assert:
+        that:
+          - docker_key_info.stdout_lines | select('match', '^pub:') | list | length == 1
+          - (docker_key_info.stdout_lines | select('match', '^fpr:') | first).split(':')[9] == docker_apt_key_fingerprint
+        fail_msg: >-
+          {{ docker_apt_keyring }} is not Docker's release key {{ docker_apt_key_fingerprint }}: refusing to trust it.
+        quiet: true
+  rescue:
+    - name: Remove the unverified key
+      ansible.builtin.file:
+        path: "{{ docker_apt_keyring }}"
+        state: absent
+
+    - name: Stop on an unverified Docker key
+      ansible.builtin.fail:
+        msg: Docker's apt key could not be downloaded or did not match the pinned fingerprint (see the error above).
+
+- name: Add Docker's apt repository (signed-by the pinned key only)
+  ansible.builtin.template:
+    src: docker.sources.j2
+    dest: /etc/apt/sources.list.d/docker.sources
+    owner: root
+    group: root
+    mode: "0644"
+  register: docker_repo
+
+- name: Check whether Docker Engine is installed
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, -f, "${db:Status-Status}", docker-ce]
+  register: docker_installed
+  changed_when: false
+  failed_when: false
+
+# Also when a previous run added the repository but stopped before installing (the package lists would lack it).
+- name: Refresh the package lists for Docker's repository
+  ansible.builtin.apt:
+    update_cache: true
+  when: docker_repo is changed or docker_installed.stdout != 'installed'
+
+- name: Install Docker Engine and the Compose plugin
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+
+- name: Create /etc/docker
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure the Docker daemon
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ docker_daemon_config | to_nice_json(indent=2) }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+- name: Enable and start containerd and docker
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [containerd, docker]
+
+# Membership of the docker group is root-equivalent (README.md, "docker group trade-off"). deploy needs it to run
+# docker compose / deploy.sh / backup.sh.
+- name: Add the deploy user to the docker group
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    groups: [docker]
+    append: true
+
+- name: Flush handlers (daemon.json takes effect before the app role)
+  ansible.builtin.meta: flush_handlers

@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+# TOCS web image (ghcr.io/<owner>/tocs-web): Caddy with the built SPA and deploy/Caddyfile baked in.
+# Build context: the repository root (see /.dockerignore).
+#   docker build -f deploy/Dockerfile.frontend -t ghcr.io/<owner>/tocs-web:<tag> .
+# Caddy runs as an unprivileged user on 8080/8443 (no CAP_NET_BIND_SERVICE needed; compose maps 80/443 onto them).
+
+ARG NODE_IMAGE=node:22.23.4-bookworm-slim
+ARG CADDY_IMAGE=caddy:2.10.2-alpine
+
+FROM ${NODE_IMAGE} AS build
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build && test -f dist/index.html
+
+FROM ${CADDY_IMAGE} AS web
+# Unprivileged runtime user. /data (certificates, ACME account) and /config are created owned by it, so the named
+# volumes mounted there inherit that ownership on first use. The upstream binary carries a file capability
+# (cap_net_bind_service+ep); with cap_drop: [ALL] the kernel refuses to exec such a file, and it is not needed on
+# high ports, so it is stripped (a plain copy does not keep the security.capability xattr).
+RUN addgroup -S -g 10001 caddy \
+ && adduser -S -D -H -u 10001 -G caddy -s /sbin/nologin caddy \
+ && mkdir -p /data/caddy /config/caddy \
+ && chown -R caddy:caddy /data /config \
+ && cp /usr/bin/caddy /usr/bin/caddy.nocap \
+ && mv -f /usr/bin/caddy.nocap /usr/bin/caddy
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
+# Fail the build on a malformed Caddyfile. Validation provisions a throwaway local CA, so it gets its own data and
+# config dirs (removed afterwards) instead of the runtime /data and /config.
+RUN SITE_ADDRESS=localhost CADDY_TLS=internal XDG_DATA_HOME=/tmp/v XDG_CONFIG_HOME=/tmp/v \
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+ && rm -rf /tmp/v
+USER caddy
+EXPOSE 8080 8443
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

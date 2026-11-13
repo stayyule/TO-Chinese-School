@@ -1,0 +1,80 @@
+# syntax=docker/dockerfile:1
+# TOCS API image (ghcr.io/<owner>/tocs-api). Build context: the repository root (see /.dockerignore).
+#   docker build -f deploy/Dockerfile.backend --target runtime -t ghcr.io/<owner>/tocs-api:<tag> .
+#   docker build -f deploy/Dockerfile.backend --target migrate -t ghcr.io/<owner>/tocs-api:<tag>-migrate .
+# Targets:
+#   build   : full dependencies (dev included: nest CLI, prisma CLI), prisma generate + nest build
+#   runtime : production dependencies only + dist + generated Prisma client; runs as the unprivileged `node` user (uid/gid 1000).
+#             The entrypoint does NOT run migrations (that is the one-shot `migrate` service).
+#   migrate : prisma CLI + prisma/ (schema, migrations) + deploy/db/*.sql + psql; runs deploy/migrate.sh.
+# Base: Debian bookworm slim (glibc, OpenSSL 3.0) -> Prisma engine target debian-openssl-3.0.x, auto-detected at
+# `prisma generate` / install time in the same base image the runtime uses.
+
+ARG NODE_IMAGE=node:22.23.4-bookworm-slim
+
+FROM ${NODE_IMAGE} AS base
+ENV CHECKPOINT_DISABLE=1 \
+    PRISMA_HIDE_UPDATE_MESSAGE=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false
+# openssl: lets Prisma detect libssl 3.0 and load its query engine. ca-certificates: TLS to SMTP / the database.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+# ---------------------------------------------------------------------------------------------------------------
+FROM base AS build
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci
+COPY backend/ ./
+# prebuild runs `prisma generate` (writes node_modules/.prisma/client incl. the debian-openssl-3.0.x engine).
+RUN npm run build \
+ && test -f dist/main.js \
+ && ls node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node
+
+# ---------------------------------------------------------------------------------------------------------------
+FROM base AS prod-deps
+COPY backend/package.json backend/package-lock.json ./
+# --ignore-scripts: @prisma/client's postinstall would try `prisma generate` without the (dev-only) CLI; the
+# generated client is copied from the build stage instead. argon2 ships prebuilt binaries (node-gyp-build).
+# npm keeps `prisma` (and with it the schema engine, @prisma/config and typescript) in the production tree because
+# @prisma/client declares them as optional peers; the runtime needs none of them (the generated client and its
+# query engine are self-contained), so the CLI and its engines are removed here.
+RUN npm ci --omit=dev --ignore-scripts \
+ && rm -rf node_modules/prisma node_modules/@prisma/engines node_modules/@prisma/engines-version \
+           node_modules/@prisma/fetch-engine node_modules/@prisma/get-platform node_modules/@prisma/config \
+           node_modules/@prisma/debug node_modules/typescript \
+           node_modules/.bin/prisma node_modules/.bin/tsc node_modules/.bin/tsserver \
+ && rm -rf /root/.npm
+
+# ---------------------------------------------------------------------------------------------------------------
+FROM base AS runtime
+ENV NODE_ENV=production \
+    PORT=3000
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /app/dist ./dist
+COPY backend/package.json ./
+# Everything stays root-owned and read-only for the runtime user; compose additionally mounts / read-only.
+RUN node -e "require('argon2'); require('@prisma/client')" \
+ && [ "$(id -u node):$(id -g node)" = "1000:1000" ] \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/lib/node_modules/corepack /usr/local/bin/corepack
+# Numeric (the image's `node` user, verified above) so runtimes can enforce non-root without resolving names.
+USER 1000:1000
+EXPOSE 3000
+CMD ["node", "dist/main.js"]
+
+# ---------------------------------------------------------------------------------------------------------------
+FROM base AS migrate
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/node_modules ./node_modules
+COPY backend/package.json ./
+COPY backend/prisma ./prisma
+COPY deploy/db/prisma-migrations-table.sql deploy/db/grants.sql ./db/
+COPY --chmod=0755 deploy/migrate.sh /usr/local/bin/tocs-migrate
+USER 1000:1000
+CMD ["tocs-migrate"]

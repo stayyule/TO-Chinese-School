@@ -1,0 +1,235 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# Least privilege by default; only the `images` job elevates (packages: write), and only on push to master.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Tool images are pinned by digest (tags are mutable). Bump together with .github/dependabot.yml docker updates.
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.24.2@sha256:b5918eb91b8d2473cec722f066abb4352e4ffdc4ec9f4283ec143aba9ec9ebc4
+  TRIVY_IMAGE: aquasec/trivy:0.58.2@sha256:665030f4d33a82c1e8d9d5e0453365842236723c1ee5cc3becca698268e66a56
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tocs_test
+        # 5433 matches the default in backend/test/helpers/db.ts; the test global-setup loads baseline.sql,
+        # every migration, deploy/db/init-roles.sql and grants.sql itself (it needs no pre-seeded roles).
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tocs_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5433/tocs_test
+      MAIL_TRANSPORT: memory
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:int
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+      # gen:api runs the backend's openapi:build and openapi-typescript (a backend devDependency).
+      - name: Install backend dependencies (for gen:api)
+        working-directory: backend
+        run: npm ci
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Test
+        working-directory: frontend
+        run: npm test
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+      - name: Generate API types
+        working-directory: frontend
+        run: npm run gen:api
+      - name: Committed API types must match the backend's OpenAPI document
+        run: |
+          # -N (intent-to-add) makes new, untracked generated files show up in the diff too.
+          git add -N frontend/src/api/generated
+          git diff --exit-code -- frontend/src/api/generated
+
+  migrations:
+    name: migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Refuse unreviewed destructive migrations
+        run: node scripts/check-migrations.mjs backend/prisma/migrations
+      - name: Script tests
+        run: node --test scripts/*.test.mjs
+
+  secrets:
+    name: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # scan the whole history, not just the tip
+          persist-credentials: false
+      # Every reachable commit, which includes the tip (the PR merge commit). Allowlist: .gitleaks.toml.
+      - name: Gitleaks
+        run: |
+          # safe.directory: the checkout is owned by the runner user, the container runs as root.
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
+            "$GITLEAKS_IMAGE" \
+            git --config /repo/.gitleaks.toml --redact --verbose --no-banner --exit-code 1 /repo
+
+  # KNOWN RED until deps/base images are bumped (multer/deepmerge-ts via @nestjs/platform-express 12; caddy base image
+  # Go stdlib CVEs). Do NOT mark as a required status check until green. `images` deliberately does not depend on it.
+  vuln:
+    name: vuln
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: npm audit (backend, production dependencies)
+        working-directory: backend
+        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit (frontend, production dependencies)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Build images for scanning
+        run: |
+          docker build -f deploy/Dockerfile.backend --target runtime -t scan/tocs-api:ci .
+          docker build -f deploy/Dockerfile.backend --target migrate -t scan/tocs-api:ci-migrate .
+          docker build -f deploy/Dockerfile.frontend -t scan/tocs-web:ci .
+      # Gate on fixable HIGH/CRITICAL findings only; unfixed base-image CVEs are not actionable.
+      - name: Trivy image scan
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy-cache"
+          for img in scan/tocs-api:ci scan/tocs-api:ci-migrate scan/tocs-web:ci; do
+            echo "::group::trivy $img"
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$RUNNER_TEMP/trivy-cache:/root/.cache" \
+              "$TRIVY_IMAGE" image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress "$img"
+            echo "::endgroup::"
+          done
+
+  stack:
+    name: stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Builds the images, brings up the production compose stack with a throwaway database and asserts the
+      # edge/security properties; tears everything down itself.
+      - name: Production stack end-to-end check
+        run: bash deploy/test/stack.test.sh
+
+  images:
+    name: images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [backend, frontend, migrations, secrets, stack]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Image names (GHCR owner must be lowercase)
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "REGISTRY_OWNER=${OWNER,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push tocs-api (runtime)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: deploy/Dockerfile.backend
+          target: runtime
+          push: true
+          tags: ghcr.io/${{ env.REGISTRY_OWNER }}/tocs-api:${{ github.sha }}
+      - name: Push tocs-api (migrate)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: deploy/Dockerfile.backend
+          target: migrate
+          push: true
+          tags: ghcr.io/${{ env.REGISTRY_OWNER }}/tocs-api:${{ github.sha }}-migrate
+      - name: Push tocs-web
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: deploy/Dockerfile.frontend
+          push: true
+          tags: ghcr.io/${{ env.REGISTRY_OWNER }}/tocs-web:${{ github.sha }}
