@@ -28,7 +28,7 @@
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		# style-src 'unsafe-inline': antd's CSS-in-JS injects <style> elements at runtime and its components set
 		# style="" attributes; scripts stay 'self' only. The payment gateway origin is added by the payments
-		# sub-project.
+		# phase.
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"

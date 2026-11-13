@@ -14,8 +14,8 @@ interface PanelDef {
 }
 
 /**
- * Home panels keyed by their home.panel.* permission. Only features that exist in this sub-project are linked;
- * links for later sub-projects (class counts, reports, withdrawals, library, track events...) are added with them.
+ * Home panels keyed by their home.panel.* permission. Only features that exist in this phase are linked;
+ * links for later phases (class counts, reports, withdrawals, library, track events...) are added with them.
  */
 const DEFS: PanelDef[] = [
   {
